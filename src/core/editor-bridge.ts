@@ -60,6 +60,32 @@ export function injectQuery(kql: string, queryName?: string): 'injected' | 'clip
   return 'injected';
 }
 
+/** Current editor content, or null if the editor is not available. */
+export function getEditorText(): string | null {
+  const editor = getMonacoEditorInstance();
+  if (!editor) return null;
+  const value: unknown = editor.getValue();
+  return typeof value === 'string' ? value : null;
+}
+
+/**
+ * Replace the whole editor content. Goes through the model's edit stack when
+ * possible so Ctrl+Z brings the previous content back.
+ */
+export function replaceEditorContent(text: string): boolean {
+  const editor = getMonacoEditorInstance();
+  if (!editor) return false;
+
+  const model = editor.getModel?.();
+  if (model && typeof model.pushEditOperations === 'function') {
+    model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+  } else {
+    editor.setValue(text);
+  }
+  editor.focus?.();
+  return true;
+}
+
 function copyToClipboard(text: string): 'clipboard' | 'failed' {
   try {
     void navigator.clipboard.writeText(text);

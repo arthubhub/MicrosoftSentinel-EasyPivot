@@ -1,43 +1,64 @@
-[![SentinelOne Userscript](https://img.shields.io/badge/Also%20available-SentinelOne%20PowerQuery%20Userscript-6C2EB9?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgMTJsMTAgMTAgMTAtMTBMMTIgMnoiLz48L3N2Zz4=)](https://github.com/LasCC/SentinelOne-Userscript)
+# Microsoft Sentinel & Defender: EasyPivot
 
-# Microsoft Sentinel & Defender: Threat Hunting Queries
+Userscript Tampermonkey pour **pivoter sur les IOC** (IP, comptes, e-mails, URL, domaines, machines, processus, applications, hashs) directement depuis les résultats de l'Advanced Hunting de **Microsoft Sentinel** (et bientôt **Microsoft Defender**).
 
-Tampermonkey userscript that adds a threat hunting query menu to **Microsoft Sentinel** and **Microsoft Defender** Advanced Hunting pages.
+Clic droit sur une cellule de résultats → **⇄ Pivot** → choix d'une règle (Statistics, Pivot ou Timeline) → la requête KQL, déjà paramétrée avec la valeur, l'heure de la ligne (T0) et la machine, est injectée dans l'éditeur.
 
-Browse, search, pin, and inject KQL queries directly into the Monaco editor.
+## Fonctionnalités
 
-## Screenshots
+- Entrée **« ⇄ Pivot · <type> »** ajoutée en tête du menu contextuel de la grille Sentinel
+- Détection automatique du type d'indicateur (présélection du plus spécifique), pivot possible sur n'importe quel type
+- **T0** lu dans la colonne de temps de la ligne (`TimeGenerated`, `Timestamp`…), avec gestion UTC / heure locale
+- **Machine** lue dans la ligne pour les règles Processus et Hash
+- Fenêtre avant/après modifiable (`30`, `30m`, `24h`, `7d`), défaut propre à chaque règle
+- Si du texte est sélectionné dans la cellule, le pivot porte sur la sélection
+- **Contexte d'investigation** (voir plus bas) : on ne perd plus l'événement de départ quand on pivote
+- Catalogue de règles **téléchargé et mis en cache** (URL modifiable), avec repli sur le catalogue intégré
+- Thème clair / sombre via les variables du portail Azure
 
-| Defender (dark mode) | Sentinel | Sentinel (popup) |
-|---|---|---|
-| ![Defender](docs/defender-dark.png) | ![Sentinel](docs/sentinel-button.png) | ![Popup](docs/sentinel-popup.png) |
+Maj + clic droit garde le menu du navigateur (copier, inspecter).
 
-## Features
+## Contexte d'investigation
 
-- Inline "Threat Hunting Queries" button in the command bar
-- Tabs: **User Rules** (bundled), **Reprise99**, **Bert-JanP**, **FalconFriday** (fetched from GitHub)
-- Category filter chips for quick sub-filtering within each repo tab
-- Search across query name, description, category, and KQL content
-- Pin queries for quick access (horizontal pill bar above results)
-- Click any query row to inject it into the editor
-- Works in both Sentinel (reactblade iframe) and Defender (security.microsoft.com)
-- Light/dark theme support via Azure Portal CSS variables
+Lancer une requête de pivot remplace la grille de résultats : l'événement de départ (le couple valeur × T0, les autres champs de la ligne) disparaît, et il fallait effacer la requête de pivot puis relancer la requête initiale pour pivoter à nouveau.
 
-## Install
+EasyPivot enregistre désormais, à chaque pivot, un **instantané de l'événement** :
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/)
-2. Click **[Install Userscript](https://raw.githubusercontent.com/LasCC/MicrosoftSentinel-Userscript/main/dist/sentinel-userscript.user.js)** (auto-installs in Tampermonkey)
-3. Navigate to Advanced Hunting in Sentinel or Defender
+- la ligne de départ (valeur, colonne, T0, machine, et tous les champs de la ligne présents à l'écran) ;
+- le contenu de l'éditeur qui avait produit cette ligne (la requête source) ;
+- les règles lancées depuis cet événement.
 
-## Public Rule Sources
+Depuis le panneau Pivot (clic droit, ou bouton **EasyPivot** dans la barre de commandes) :
 
-| Repo | Queries | Format |
-|------|---------|--------|
-| [reprise99/Sentinel-Queries](https://github.com/reprise99/Sentinel-Queries) | ~460 | `.kql` files |
-| [Bert-JanP/Hunting-Queries-Detection-Rules](https://github.com/Bert-JanP/Hunting-Queries-Detection-Rules) | ~445 | `.md` with fenced KQL |
-| [FalconForceTeam/FalconFriday](https://github.com/FalconForceTeam/FalconFriday) | ~40 | `.md` with fenced KQL |
+- **Événement** : revenir à n'importe quel événement précédent, sans relancer de requête ;
+- **Champs de la ligne** : pivoter sur un autre champ de la même ligne en un clic (IP, compte, machine…) ;
+- **↶ Requête source** : remettre dans l'éditeur la requête initiale (Ctrl+Z pour annuler) ;
+- les règles déjà lancées sur la valeur sont marquées **✓ lancée**.
 
-Rules are fetched lazily on first tab click, cached locally for 12 hours.
+Les 30 derniers événements sont conservés dans le stockage Tampermonkey (local au navigateur).
+
+## Catalogue de règles
+
+Les règles sont maintenues dans un dépôt séparé : [MSSentinel-PivotRules](https://github.com/arthubhub/MSSentinel-PivotRules) (une règle = un fichier YAML, compilée et validée par la CI de ce dépôt). Par défaut, EasyPivot télécharge :
+
+```
+https://github.com/arthubhub/MSSentinel-PivotRules/releases/latest/download/pivot-rules.flat.json
+```
+
+Les deux formats publiés par le dépôt de règles sont acceptés :
+
+- `pivot-rules.json` (format complet) : utilisé tel quel, variantes Defender comprises ;
+- `pivot-rules.flat.json` (`[{ name, category, description, query }]`) : converti à la volée. L'id, l'action, l'indicateur, la fenêtre par défaut, les paramètres et le rendu sont déduits du nom, de la catégorie et de l'en-tête KQL ; les informations absentes du format plat (indicateurs secondaires, `v1`, lecture des résultats) sont reprises de la même règle du catalogue intégré.
+
+Le catalogue est mis en cache 12 h et rafraîchi en arrière-plan. L'URL se change dans le panneau Pivot → ⚙ Paramètres. Si le téléchargement échoue, le dernier catalogue valide (ou celui intégré au script, `rules/pivot-rules.json`, copie du format complet) reste utilisé.
+
+Chaque requête commence par un en-tête de paramètres : une requête non remplie reste du KQL valide. À l'injection, les lignes vides sont retirées (dans l'éditeur Sentinel, une ligne vide sépare deux requêtes) et les lignes de commentaire gardent leurs `{{…}}`.
+
+## Installation
+
+1. Installer [Tampermonkey](https://www.tampermonkey.net/)
+2. Cliquer sur **[Installer le userscript](https://github.com/arthubhub/MicrosoftSentinel-EasyPivot/releases/latest/download/sentinel-easypivot.user.js)**
+3. Ouvrir l'Advanced Hunting de Sentinel
 
 ## Build
 
@@ -46,8 +67,22 @@ npm install
 npm run build
 ```
 
-Output: `dist/sentinel-userscript.user.js`
+Sortie : `dist/sentinel-easypivot.user.js`. `npm run check` lance le typecheck puis le build.
 
-## Related
+## Publication
 
-- [SentinelOne Userscript](https://github.com/LasCC/SentinelOne-Userscript) - Similar project for SentinelOne
+Le workflow `Build & Release` vérifie chaque pull request et chaque push (typecheck + build). À chaque merge sur la branche par défaut, il publie une release contenant `sentinel-easypivot.user.js`, avec la version `<version du package>.<numéro de run>` (Tampermonkey ne met à jour que si `@version` augmente). Lien stable :
+
+```
+https://github.com/arthubhub/MicrosoftSentinel-EasyPivot/releases/latest/download/sentinel-easypivot.user.js
+```
+
+## Feuille de route
+
+- **Defender** : cartographier la grille de résultats de security.microsoft.com (l'adaptateur et le mode « clic droit → panneau direct » sont déjà prêts)
+- **Extension statistiques des tables** : récupérer des stats sur les tables (présence, volumétrie, rétention) pour adapter les règles proposées
+- **Extension catalogue** : enrichir et mettre à jour les règles sur le dépôt GitHub depuis l'outil
+
+## Crédits
+
+Ce projet est un fork de [MicrosoftSentinel-Userscript](https://github.com/LasCC/MicrosoftSentinel-Userscript) de **LasCC**, sans qui il n'existerait pas : intégration au portail, pont vers l'éditeur Monaco, thème et composants d'interface viennent de son travail.

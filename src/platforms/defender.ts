@@ -1,4 +1,4 @@
-import type { MonacoEditorInstance, PlatformAdapter } from '../types.ts';
+import type { CellContext, MonacoEditorInstance, PlatformAdapter } from '../types.ts';
 import { SELECTORS } from '../config.ts';
 import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
 
@@ -14,10 +14,15 @@ import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
  * NOTE: There are multiple .ms-CommandBar-primaryCommand on the page
  * (top bar + results table bar). The selector is scoped to .scc-commandBar
  * to target only the top one.
+ *
+ * The results grid is not mapped yet: readCellContext returns null, so the
+ * right-click keeps the browser menu. Once mapped, cellMenu 'none' makes the
+ * right-click open the Pivot panel directly (Defender's grid has no menu).
  */
 export const defenderAdapter: PlatformAdapter = {
   id: 'defender',
   label: 'Microsoft Defender',
+  cellMenu: 'none',
 
   getButtonInjectionTarget(): HTMLElement | null {
     // There are multiple .scc-commandBar on the page (top bar + results table bar).
@@ -29,28 +34,19 @@ export const defenderAdapter: PlatformAdapter = {
     return topCommandBar.querySelector<HTMLElement>('.ms-CommandBar-primaryCommand');
   },
 
-  getPinnedBarTarget(): HTMLElement | null {
-    // Find the command bar, walk up to the direct child of mainContent,
-    // then return nextElementSibling - so the pinned bar is inserted
-    // between the command bar area and the editor/results below.
-    const mainContent = document.querySelector<HTMLElement>(SELECTORS.DEFENDER.MAIN_CONTENT);
-    if (!mainContent) return null;
-    const commandBar = mainContent.querySelector<HTMLElement>(SELECTORS.DEFENDER.COMMAND_BAR);
-    if (!commandBar) return mainContent.firstElementChild as HTMLElement | null;
-    // Walk up from commandBar until we reach a direct child of mainContent
-    let ancestor: HTMLElement | null = commandBar;
-    while (ancestor && ancestor.parentElement !== mainContent) {
-      ancestor = ancestor.parentElement;
-    }
-    // Return the next sibling - the pinned bar will be inserted before it
-    return ancestor?.nextElementSibling as HTMLElement | null;
-  },
-
   getMonacoEditor(): MonacoEditorInstance | null {
     return getMonacoEditorInstance();
   },
 
   isHuntingPage(): boolean {
     return document.querySelector(SELECTORS.DEFENDER.RUN_BUTTON) !== null;
+  },
+
+  readCellContext(): CellContext | null {
+    return null;
+  },
+
+  getOpenContextMenu(): HTMLElement | null {
+    return null;
   },
 };

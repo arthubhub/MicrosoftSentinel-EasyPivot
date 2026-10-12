@@ -1,6 +1,7 @@
 import type { MonacoEditorInstance, PlatformAdapter } from '../types.ts';
 import { SELECTORS } from '../config.ts';
 import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
+import { getOpenAgGridContextMenu, readAgGridCellContext } from './ag-grid.ts';
 
 /**
  * MS Sentinel (Azure Portal) platform adapter.
@@ -10,27 +11,22 @@ import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
  *
  * Key DOM landmarks:
  * - #DiscoverWrapper                     - main hunting wrapper
- * - .filter-panel                        - command bar area
  * - .left-side.kql-mode-panel            - left panel (Run button, time picker, KQL mode)
- * - .run-split-button .btn-submit        - Run button
- * - la-results-view                      - results area below editor
+ * - .logs-results-grid .ag-root          - results grid (AG Grid)
+ *
+ * The results grid has its own right-click menu ('native'): the Pivot entry
+ * is added to it. If that menu turns out to open on left click only, switch
+ * to 'none' and the right-click opens the Pivot panel directly.
  */
 export const sentinelAdapter: PlatformAdapter = {
   id: 'sentinel',
   label: 'Microsoft Sentinel',
+  cellMenu: 'native',
 
   getButtonInjectionTarget(): HTMLElement | null {
-    // Insert into the left-side KQL mode panel only - no fallback to filter-panel
-    // so the button sits inline with Run, time picker, etc.
+    // Insert into the left-side KQL mode panel only, so the button sits
+    // inline with Run, time picker, etc.
     return document.querySelector<HTMLElement>(SELECTORS.SENTINEL.KQL_PANEL);
-  },
-
-  getPinnedBarTarget(): HTMLElement | null {
-    // Insert above the results view
-    return (
-      document.querySelector<HTMLElement>(SELECTORS.SENTINEL.RESULTS_VIEW) ??
-      null
-    );
   },
 
   getMonacoEditor(): MonacoEditorInstance | null {
@@ -40,4 +36,8 @@ export const sentinelAdapter: PlatformAdapter = {
   isHuntingPage(): boolean {
     return document.querySelector(SELECTORS.SENTINEL.DISCOVER_WRAPPER) !== null;
   },
+
+  readCellContext: readAgGridCellContext,
+
+  getOpenContextMenu: getOpenAgGridContextMenu,
 };
