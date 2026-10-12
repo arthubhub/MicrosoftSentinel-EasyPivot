@@ -12,10 +12,8 @@ export const STORAGE_KEYS = {
 } as const;
 
 // ── Pivot rules catalog ──
-// Rules repo: https://github.com/arthubhub/MSSentinel-PivotRules
-// (pivot-rules.json, the full format, is also accepted)
 export const DEFAULT_RULES_URL =
-  'https://github.com/arthubhub/MSSentinel-PivotRules/releases/latest/download/pivot-rules.flat.json';
+  'https://github.com/arthubhub/MSSentinel-PivotRules/releases/latest/download/pivot-rules.json';
 
 /** A cached catalog older than this is refreshed in the background (12 hours) */
 export const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
