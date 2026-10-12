@@ -2,7 +2,7 @@
 // @name         Microsoft Sentinel & Defender: EasyPivot
 // @namespace    https://github.com/arthubhub/MicrosoftSentinel-EasyPivot
 // @version      0.1.0
-// @description  Right-click pivot on IOCs in Sentinel (and soon Defender) Advanced Hunting results
+// @description  Right-click pivot on IOCs in Sentinel Advanced Hunting results
 // @author       arthubhub
 // @homepageURL  https://github.com/arthubhub/MicrosoftSentinel-EasyPivot
 // @supportURL   https://github.com/arthubhub/MicrosoftSentinel-EasyPivot/issues

@@ -1,7 +1,7 @@
 {
   "name": "microsoft-sentinel-easypivot",
   "version": "0.1.0",
-  "description": "Right-click IOC pivoting for MS Sentinel & Defender Advanced Hunting",
+  "description": "Right-click IOC pivoting for MS Sentinel / Defender Advanced Hunting",
   "private": true,
   "type": "module",
   "scripts": {
