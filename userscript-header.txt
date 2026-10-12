@@ -1,18 +1,24 @@
 // ==UserScript==
-// @name         Microsoft Sentinel & Defender: Threat Hunting Queries
-// @version      1.0.0
-// @description  Custom threat hunting query menu for MS Sentinel & Defender
-// @author       LasCC
+// @name         Microsoft Sentinel & Defender: EasyPivot
+// @namespace    https://github.com/arthubhub/MicrosoftSentinel-EasyPivot
+// @version      0.1.0
+// @description  Right-click pivot on IOCs in Sentinel (and soon Defender) Advanced Hunting results
+// @author       arthubhub
+// @homepageURL  https://github.com/arthubhub/MicrosoftSentinel-EasyPivot
+// @supportURL   https://github.com/arthubhub/MicrosoftSentinel-EasyPivot/issues
 // @match        *://security.microsoft.com/*
 // @match        *://*.reactblade.portal.azure.net/*
-// @downloadURL  https://raw.githubusercontent.com/LasCC/MicrosoftSentinel-Userscript/main/dist/sentinel-userscript.user.js
-// @updateURL    https://raw.githubusercontent.com/LasCC/MicrosoftSentinel-Userscript/main/dist/sentinel-userscript.user.js
+// @downloadURL  https://github.com/arthubhub/MicrosoftSentinel-EasyPivot/releases/latest/download/sentinel-easypivot.user.js
+// @updateURL    https://github.com/arthubhub/MicrosoftSentinel-EasyPivot/releases/latest/download/sentinel-easypivot.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        unsafeWindow
-// @connect      api.github.com
+// @connect      github.com
+// @connect      objects.githubusercontent.com
+// @connect      release-assets.githubusercontent.com
 // @connect      raw.githubusercontent.com
+// @connect      *
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=security.microsoft.com
 // ==/UserScript==

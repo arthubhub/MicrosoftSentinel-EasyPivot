@@ -2,13 +2,16 @@ name: Build & Release
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-release:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,14 +24,45 @@ jobs:
 
       - run: npm ci
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Check (typecheck + build)
+        run: npm run check
+
+  build-and-release:
+    needs: test
+    # No release on pull requests: only on a push (merge) to the default branch
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Tampermonkey only updates when @version increases
+      - name: Stamp userscript version
+        id: version
+        run: |
+          VERSION="$(node -p "require('./package.json').version").${{ github.run_number }}"
+          sed -i -E "s|^(// @version[[:space:]]+).*|\1${VERSION}|" userscript-header.txt
+          grep -q "@version *${VERSION}$" userscript-header.txt
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build
         run: npm run build
 
-      - name: Verify userscript header
-        run: head -1 dist/sentinel-userscript.user.js | grep -q '// ==UserScript=='
+      - name: Verify outputs
+        run: |
+          f=dist/sentinel-easypivot.user.js
+          test -s "$f" || { echo "::error::$f est absent ou vide"; exit 1; }
+          head -1 "$f" | grep -q '// ==UserScript==' || { echo "::error::en-tête userscript absent"; exit 1; }
+          grep -q "@version *${{ steps.version.outputs.VERSION }}$" "$f" || { echo "::error::version non tamponnée"; exit 1; }
 
       - name: Generate release tag
         id: tag
@@ -41,21 +75,26 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.TAG }}
-          name: Build - ${{ steps.tag.outputs.DATE }}
+          name: Build ${{ steps.version.outputs.VERSION }} - ${{ steps.tag.outputs.DATE }}
           body: |
-            ## Microsoft Sentinel & Defender: Threat Hunting Queries
+            ## Microsoft Sentinel & Defender : EasyPivot
 
-            **Built from** `${{ github.sha }}` on ${{ steps.tag.outputs.DATE }}
+            **Construit depuis** `${{ github.sha }}` le ${{ steps.tag.outputs.DATE }} — version `${{ steps.version.outputs.VERSION }}`
+
+            ### Fichiers
+            - `sentinel-easypivot.user.js` : userscript Tampermonkey
 
             ### Installation
-            1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
-            2. Click **sentinel-userscript.user.js** below to auto-install in Tampermonkey
-            3. Open Tampermonkey dashboard → Utilities → Import from file
-            4. Select the downloaded `.js` file
+            1. Installer [Tampermonkey](https://www.tampermonkey.net/)
+            2. Ouvrir l'URL stable ci-dessous : Tampermonkey propose l'installation, puis met le script à jour automatiquement
 
-            Or install directly from the raw URL:
+            ### Dernière version (URL stable)
             ```
-            https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.TAG }}/sentinel-userscript.user.js
+            https://github.com/${{ github.repository }}/releases/latest/download/sentinel-easypivot.user.js
             ```
-          files: dist/sentinel-userscript.user.js
+
+            Les règles de pivot sont publiées par [MSSentinel-PivotRules](https://github.com/arthubhub/MSSentinel-PivotRules).
+          files: |
+            dist/sentinel-easypivot.user.js
           generate_release_notes: true
+          make_latest: true

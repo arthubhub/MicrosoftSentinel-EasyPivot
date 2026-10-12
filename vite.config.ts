@@ -26,8 +26,8 @@ export default defineConfig({
     lib: {
       entry: 'src/main.ts',
       formats: ['iife'],
-      name: 'SentinelHuntingQueries',
-      fileName: () => 'sentinel-userscript.user.js',
+      name: 'SentinelEasyPivot',
+      fileName: () => 'sentinel-easypivot.user.js',
     },
     outDir: 'dist',
     minify: false,
