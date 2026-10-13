@@ -47,7 +47,7 @@ export const SELECTORS = {
     /** The discover wrapper */
     DISCOVER_WRAPPER: '#DiscoverWrapper',
     /** The left-side KQL mode panel (contains Run, time picker, etc.) */
-    KQL_PANEL: '.left-side.kql-mode-panel',
+    KQL_PANEL: "[data-logs-query-controls-bar]",
     /** AG Grid root of the results view */
     GRID_ROOT: '.logs-results-grid .ag-root',
     GRID_CELL: '[role="gridcell"][col-id]',
