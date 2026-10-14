@@ -1,37 +1,33 @@
-import type { CellContext, MonacoEditorInstance, PlatformAdapter } from '../types.ts';
+import type { MonacoEditorInstance, PlatformAdapter } from '../types.ts';
 import { SELECTORS } from '../config.ts';
 import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
+import {
+  addFluentMenuItem,
+  closeFluentContextMenu,
+  getOpenFluentContextMenu,
+  readFluentCellContext,
+} from './fluent-grid.ts';
 
 /**
  * MS Defender (security.microsoft.com) platform adapter.
  *
  * Key DOM landmarks:
- * - .scc-sidePanelPage-mainContent                - main content area
- * - .scc-commandBar                               - top command bar wrapper
- * - .scc-commandBar .ms-CommandBar-primaryCommand  - primary commands (Run, time, Save, Share)
- * - #huntingRunQueryButtonId                       - Run query button
+ * - #huntingRunQueryButtonId                         - Run query button (page detection)
+ * - #Join_Queries_Bubble_Advanced_Hunting_Query_Editor - the button is appended to its parent
+ * - [role=row].ms-DetailsRow                         - results grid (Fluent UI DetailsList)
+ * - .ms-ContextualMenu-Callout .ms-ContextualMenu-list - cell menu
  *
- * NOTE: There are multiple .ms-CommandBar-primaryCommand on the page
- * (top bar + results table bar). The selector is scoped to .scc-commandBar
- * to target only the top one.
- *
- * The results grid is not mapped yet: readCellContext returns null, so the
- * right-click keeps the browser menu. Once mapped, cellMenu 'none' makes the
- * right-click open the Pivot panel directly (Defender's grid has no menu).
+ * The results grid has its own cell menu ('native'): the Pivot entry is put
+ * first in it. It is watched after a right-click and after a left click
+ * (menuOnClick), whichever opens it.
  */
 export const defenderAdapter: PlatformAdapter = {
   id: 'defender',
   label: 'Microsoft Defender',
-  cellMenu: 'none',
+  cellMenu: 'native',
 
   getButtonInjectionTarget(): HTMLElement | null {
-    // There are multiple .scc-commandBar on the page (top bar + results table bar).
-    // Scope to the FIRST one inside mainContent - that's the top command bar.
-    const mainContent = document.querySelector<HTMLElement>(SELECTORS.DEFENDER.MAIN_CONTENT);
-    if (!mainContent) return null;
-    const topCommandBar = mainContent.querySelector<HTMLElement>(SELECTORS.DEFENDER.COMMAND_BAR);
-    if (!topCommandBar) return null;
-    return topCommandBar.querySelector<HTMLElement>('.ms-CommandBar-primaryCommand');
+    return document.querySelector<HTMLElement>(SELECTORS.DEFENDER.BUTTON_ANCHOR)?.parentElement ?? null;
   },
 
   getMonacoEditor(): MonacoEditorInstance | null {
@@ -42,11 +38,13 @@ export const defenderAdapter: PlatformAdapter = {
     return document.querySelector(SELECTORS.DEFENDER.RUN_BUTTON) !== null;
   },
 
-  readCellContext(): CellContext | null {
-    return null;
-  },
+  readCellContext: readFluentCellContext,
 
-  getOpenContextMenu(): HTMLElement | null {
-    return null;
-  },
+  getOpenContextMenu: getOpenFluentContextMenu,
+
+  menuOnClick: true,
+
+  addContextMenuItem: addFluentMenuItem,
+
+  closeContextMenu: closeFluentContextMenu,
 };

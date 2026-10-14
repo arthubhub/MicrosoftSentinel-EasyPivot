@@ -17,6 +17,12 @@ export interface PlatformAdapter {
   readCellContext(target: Element): CellContext | null;
   /** The grid's context menu list, if it is currently open */
   getOpenContextMenu(): HTMLElement | null;
+  /** Does the grid menu (also) open on a left click on a cell? */
+  readonly menuOnClick: boolean;
+  /** Put a Pivot entry first in the grid menu, with the menu's own markup */
+  addContextMenuItem(list: HTMLElement, label: string, onSelect: () => void): void;
+  /** Close the grid menu (after the Pivot entry was chosen) */
+  closeContextMenu(list: HTMLElement): void;
 }
 
 // ── Pivot Catalog ──

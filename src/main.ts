@@ -79,28 +79,19 @@ function injectUI(): void {
   placeButton(button.element, platform);
 }
 
-// ── Place button with retry ──
+// ── Place button, and put it back if the page re-renders its spot ──
 
 let buttonObserver: MutationObserver | null = null;
 
 function placeButton(el: HTMLElement, plat: PlatformAdapter): void {
-  const target = plat.getButtonInjectionTarget();
-  if (target) {
-    target.appendChild(el);
-    return;
-  }
+  const place = (): void => {
+    const target = plat.getButtonInjectionTarget();
+    if (target && el.parentElement !== target) target.appendChild(el);
+  };
 
-  document.body.appendChild(el);
+  place();
 
-  buttonObserver = new MutationObserver(() => {
-    const t = plat.getButtonInjectionTarget();
-    if (t) {
-      t.appendChild(el);
-      buttonObserver?.disconnect();
-      buttonObserver = null;
-    }
-  });
-
+  buttonObserver = new MutationObserver(place);
   buttonObserver.observe(document.body, { childList: true, subtree: true });
 }
 

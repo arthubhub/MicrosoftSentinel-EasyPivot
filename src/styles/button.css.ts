@@ -77,4 +77,20 @@ export const buttonStyles = `
     margin-right: 4px !important;
     flex-shrink: 0 !important;
   }
+
+  /* Defender: wrapper of the native-looking button, next to « Join queries » */
+  .${CSS_PREFIX}-btn-wrap-native {
+    display: inline-flex !important;
+    align-items: center !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Divider under the Pivot entry of the Defender cell menu */
+  .${CSS_PREFIX}-pivot-option-separator {
+    display: block !important;
+    height: 1px !important;
+    margin: 4px 0 !important;
+    background: var(--colorNeutralStroke2, #e1dfdd) !important;
+    list-style: none !important;
+  }
 `;
