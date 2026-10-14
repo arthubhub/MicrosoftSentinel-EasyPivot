@@ -7,8 +7,8 @@ export interface PlatformAdapter {
   readonly label: string;
   /** Does the results grid have its own right-click menu? */
   readonly cellMenu: 'native' | 'none';
-  /** Target element where the inline EasyPivot button should be appended */
-  getButtonInjectionTarget(): HTMLElement | null;
+  /** Where the inline EasyPivot button goes; null = not rendered yet */
+  getButtonAnchor(): ButtonAnchor | null;
   /** Attempt to get the Monaco editor instance on the page */
   getMonacoEditor(): MonacoEditorInstance | null;
   /** Check if the current page is the Advanced Hunting page */
@@ -17,6 +17,12 @@ export interface PlatformAdapter {
   readCellContext(target: Element): CellContext | null;
   /** The grid's context menu list, if it is currently open */
   getOpenContextMenu(): HTMLElement | null;
+}
+
+/** Appended to `container`, or inserted right after `after` (a child of `container`) */
+export interface ButtonAnchor {
+  readonly container: HTMLElement;
+  readonly after?: HTMLElement;
 }
 
 // ── Pivot Catalog ──

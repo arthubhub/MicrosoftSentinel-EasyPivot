@@ -1,4 +1,4 @@
-import type { MonacoEditorInstance, PlatformAdapter } from '../types.ts';
+import type { ButtonAnchor, MonacoEditorInstance, PlatformAdapter } from '../types.ts';
 import { SELECTORS } from '../config.ts';
 import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
 import { getOpenAgGridContextMenu, readAgGridCellContext } from './ag-grid.ts';
@@ -23,10 +23,11 @@ export const sentinelAdapter: PlatformAdapter = {
   label: 'Microsoft Sentinel',
   cellMenu: 'native',
 
-  getButtonInjectionTarget(): HTMLElement | null {
+  getButtonAnchor(): ButtonAnchor | null {
     // Insert into the left-side KQL mode panel only, so the button sits
     // inline with Run, time picker, etc.
-    return document.querySelector<HTMLElement>(SELECTORS.SENTINEL.KQL_PANEL);
+    const container = document.querySelector<HTMLElement>(SELECTORS.SENTINEL.KQL_PANEL);
+    return container ? { container } : null;
   },
 
   getMonacoEditor(): MonacoEditorInstance | null {

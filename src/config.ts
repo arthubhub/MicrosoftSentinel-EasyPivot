@@ -35,12 +35,12 @@ export const SNAPSHOTS = {
 export const SELECTORS = {
   /** MS Defender (security.microsoft.com) */
   DEFENDER: {
-    /** The command bar above the hunting editor */
-    COMMAND_BAR: '.scc-commandBar',
-    /** The main content area */
-    MAIN_CONTENT: '.scc-sidePanelPage-mainContent',
-    /** Run query button */
+    /** Run query button: the button is anchored next to it */
     RUN_BUTTON: '#huntingRunQueryButtonId',
+    /** Slot of a command in the bar (Fluent OverflowSet item, or split button container) */
+    COMMAND_SLOT: '.ms-OverflowSet-item, [class*="splitButtonContainer"]',
+    /** Command bar buttons whose generated classes are copied */
+    COMMAND_BUTTON: '.ms-Button.ms-Button--commandBar',
   },
   /** MS Sentinel (portal.azure.com via reactblade iframe) */
   SENTINEL: {

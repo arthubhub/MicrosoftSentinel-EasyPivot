@@ -1,4 +1,4 @@
-import { CSS_PREFIX } from '../config.ts';
+import { CSS_PREFIX, SELECTORS } from '../config.ts';
 import type { PlatformId } from '../types.ts';
 
 const BUTTON_LABEL = 'EasyPivot';
@@ -58,15 +58,17 @@ function getFluentClassMap(): Record<string, string> {
     item: 'ms-OverflowSet-item',
   };
 
-  // Find a sibling commandBar button to copy its generated class names.
-  // Prefer an enabled button; fall back to disabled if all are disabled.
+  // Copy the generated class names of a button from Run's own bar (Run itself
+  // excluded: it may be styled as a primary button). Prefer an enabled button.
+  const { RUN_BUTTON, COMMAND_SLOT, COMMAND_BUTTON } = SELECTORS.DEFENDER;
+  const run = document.querySelector<HTMLElement>(RUN_BUTTON);
+  const bar = run?.closest<HTMLElement>(COMMAND_SLOT)?.parentElement ?? run?.parentElement ?? null;
+  const others = `${COMMAND_BUTTON}:not(${RUN_BUTTON})`;
   const ref =
-    document.querySelector<HTMLButtonElement>(
-      '.scc-commandBar .ms-Button.ms-Button--commandBar:not(:disabled)',
-    ) ??
-    document.querySelector<HTMLButtonElement>(
-      '.scc-commandBar .ms-Button.ms-Button--commandBar',
-    );
+    bar?.querySelector<HTMLButtonElement>(`${others}:not(:disabled)`) ??
+    bar?.querySelector<HTMLButtonElement>(others) ??
+    document.querySelector<HTMLButtonElement>(`${others}:not(:disabled)`) ??
+    document.querySelector<HTMLButtonElement>(others);
   if (!ref) return map;
 
   map.root = copyClasses(ref, map.root);

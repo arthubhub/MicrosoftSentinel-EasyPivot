@@ -1,19 +1,14 @@
-import type { CellContext, MonacoEditorInstance, PlatformAdapter } from '../types.ts';
+import type { ButtonAnchor, CellContext, MonacoEditorInstance, PlatformAdapter } from '../types.ts';
 import { SELECTORS } from '../config.ts';
 import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
 
 /**
  * MS Defender (security.microsoft.com) platform adapter.
  *
- * Key DOM landmarks:
- * - .scc-sidePanelPage-mainContent                - main content area
- * - .scc-commandBar                               - top command bar wrapper
- * - .scc-commandBar .ms-CommandBar-primaryCommand  - primary commands (Run, time, Save, Share)
- * - #huntingRunQueryButtonId                       - Run query button
- *
- * NOTE: There are multiple .ms-CommandBar-primaryCommand on the page
- * (top bar + results table bar). The selector is scoped to .scc-commandBar
- * to target only the top one.
+ * Key DOM landmark: #huntingRunQueryButtonId (Run query button). The EasyPivot
+ * button is inserted right after Run's slot, whatever bar holds it: the page's
+ * .scc-commandBar is not the hunting editor's bar (it does not contain Run),
+ * and a button placed there was wiped on the next render.
  *
  * The results grid is not mapped yet: readCellContext returns null, so the
  * right-click keeps the browser menu. Once mapped, cellMenu 'none' makes the
@@ -24,14 +19,12 @@ export const defenderAdapter: PlatformAdapter = {
   label: 'Microsoft Defender',
   cellMenu: 'none',
 
-  getButtonInjectionTarget(): HTMLElement | null {
-    // There are multiple .scc-commandBar on the page (top bar + results table bar).
-    // Scope to the FIRST one inside mainContent - that's the top command bar.
-    const mainContent = document.querySelector<HTMLElement>(SELECTORS.DEFENDER.MAIN_CONTENT);
-    if (!mainContent) return null;
-    const topCommandBar = mainContent.querySelector<HTMLElement>(SELECTORS.DEFENDER.COMMAND_BAR);
-    if (!topCommandBar) return null;
-    return topCommandBar.querySelector<HTMLElement>('.ms-CommandBar-primaryCommand');
+  getButtonAnchor(): ButtonAnchor | null {
+    const run = document.querySelector<HTMLElement>(SELECTORS.DEFENDER.RUN_BUTTON);
+    if (!run) return null;
+    const slot = run.closest<HTMLElement>(SELECTORS.DEFENDER.COMMAND_SLOT) ?? run;
+    const container = slot.parentElement;
+    return container ? { container, after: slot } : null;
   },
 
   getMonacoEditor(): MonacoEditorInstance | null {
