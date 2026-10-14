@@ -1,4 +1,4 @@
-import { CSS_PREFIX } from '../config.ts';
+import { CSS_PREFIX, SELECTORS } from '../config.ts';
 import type { PlatformId } from '../types.ts';
 
 const BUTTON_LABEL = 'EasyPivot';
@@ -46,8 +46,9 @@ function copyClasses(el: HTMLElement, semanticPrefix: string): string {
 }
 
 /**
- * Find an existing CommandBar button on the page and steal its generated
- * CSS-in-JS class names so our button inherits the exact same styles.
+ * Find an existing button on the page and steal its generated CSS-in-JS
+ * class names so our button inherits the exact same styles: first a
+ * neighbour of « Join queries » (where the button goes), then a command bar button.
  */
 function getFluentClassMap(): Record<string, string> {
   const map: Record<string, string> = {
@@ -55,12 +56,12 @@ function getFluentClassMap(): Record<string, string> {
     flexContainer: 'ms-Button-flexContainer',
     textContainer: 'ms-Button-textContainer',
     label: 'ms-Button-label',
-    item: 'ms-OverflowSet-item',
   };
 
-  // Find a sibling commandBar button to copy its generated class names.
   // Prefer an enabled button; fall back to disabled if all are disabled.
+  const scope = document.querySelector(SELECTORS.DEFENDER.BUTTON_ANCHOR)?.parentElement;
   const ref =
+    scope?.querySelector<HTMLButtonElement>('.ms-Button:not(:disabled)') ??
     document.querySelector<HTMLButtonElement>(
       '.scc-commandBar .ms-Button.ms-Button--commandBar:not(:disabled)',
     ) ??
@@ -80,9 +81,6 @@ function getFluentClassMap(): Record<string, string> {
   const lb = ref.querySelector<HTMLElement>('.ms-Button-label');
   if (lb) map.label = copyClasses(lb, map.label);
 
-  const item = ref.closest<HTMLElement>('.ms-OverflowSet-item');
-  if (item) map.item = copyClasses(item, map.item);
-
   return map;
 }
 
@@ -90,7 +88,7 @@ function createDefenderButton(onClick: () => void): ButtonComponent {
   const cls = getFluentClassMap();
 
   const wrapper = document.createElement('div');
-  wrapper.className = cls.item;
+  wrapper.className = `${CSS_PREFIX}-btn-wrap-native`;
   wrapper.setAttribute('role', 'none');
 
   const btn = document.createElement('button');

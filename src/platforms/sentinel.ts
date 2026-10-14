@@ -1,7 +1,12 @@
 import type { MonacoEditorInstance, PlatformAdapter } from '../types.ts';
 import { SELECTORS } from '../config.ts';
 import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
-import { getOpenAgGridContextMenu, readAgGridCellContext } from './ag-grid.ts';
+import {
+  addAgGridMenuItem,
+  closeAgGridContextMenu,
+  getOpenAgGridContextMenu,
+  readAgGridCellContext,
+} from './ag-grid.ts';
 
 /**
  * MS Sentinel (Azure Portal) platform adapter.
@@ -40,4 +45,10 @@ export const sentinelAdapter: PlatformAdapter = {
   readCellContext: readAgGridCellContext,
 
   getOpenContextMenu: getOpenAgGridContextMenu,
+
+  menuOnClick: false,
+
+  addContextMenuItem: addAgGridMenuItem,
+
+  closeContextMenu: closeAgGridContextMenu,
 };

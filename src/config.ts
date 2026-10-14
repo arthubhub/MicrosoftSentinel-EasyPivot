@@ -41,13 +41,22 @@ export const SELECTORS = {
     MAIN_CONTENT: '.scc-sidePanelPage-mainContent',
     /** Run query button */
     RUN_BUTTON: '#huntingRunQueryButtonId',
+    /** The button is appended to this element's parent (after it, last child) */
+    BUTTON_ANCHOR: '#Join_Queries_Bubble_Advanced_Hunting_Query_Editor',
+    /** Results grid (Fluent UI DetailsList) */
+    GRID_ROW: '[role="row"].ms-DetailsRow',
+    GRID_CELL: '[role="gridcell"][data-automation-key]',
+    /** Element of a cell that carries the full value and the column name */
+    GRID_VALUE: '[context-data-property]',
+    /** Open Fluent UI context menu (cell menu: « Ajouter … == … », « Copier … ») */
+    CONTEXT_MENU_LIST: '.ms-ContextualMenu-Callout .ms-ContextualMenu-list.is-open',
   },
   /** MS Sentinel (portal.azure.com via reactblade iframe) */
   SENTINEL: {
     /** The discover wrapper */
     DISCOVER_WRAPPER: '#DiscoverWrapper',
     /** The left-side KQL mode panel (contains Run, time picker, etc.) */
-    KQL_PANEL: "[data-logs-query-controls-bar]",
+    KQL_PANEL: '[data-logs-query-controls-bar]',
     /** AG Grid root of the results view */
     GRID_ROOT: '.logs-results-grid .ag-root',
     GRID_CELL: '[role="gridcell"][col-id]',
@@ -69,8 +78,11 @@ export const PIVOT = {
   INDICATOR_PRIORITY: ['ip', 'hash', 'application', 'url', 'email', 'process', 'domain', 'device', 'account'],
   /** AG Grid columns that never hold a pivotable value */
   IGNORED_COLUMNS: ['ag-Grid-SelectionColumn'],
-  /** Max wait for the AG Grid menu after the right-click */
+  /** Max wait for the grid menu after the click */
   MENU_WAIT_MS: 800,
+  /** Marks the Pivot entry added to a grid menu (and its separator) */
+  MENU_ITEM_CLASS: `${CSS_PREFIX}-pivot-option`,
+  MENU_SEPARATOR_CLASS: `${CSS_PREFIX}-pivot-option-separator`,
 } as const;
 
 // ── Notification duration ──

@@ -105,3 +105,54 @@ export function getOpenAgGridContextMenu(): HTMLElement | null {
   if (!document.querySelector(S.CONTEXT_MENU_OPEN)) return null;
   return document.querySelector<HTMLElement>(S.CONTEXT_MENU_LIST);
 }
+
+/** Pivot entry with AG Grid's own markup, to inherit the native rendering */
+export function addAgGridMenuItem(list: HTMLElement, label: string, onSelect: () => void): void {
+  const item = document.createElement('div');
+  item.className = `ag-menu-option ${PIVOT.MENU_ITEM_CLASS}`;
+  item.setAttribute('role', 'menuitem');
+  item.tabIndex = -1;
+  const parts: [string, string][] = [
+    ['ag-menu-option-icon', '⇄'],
+    ['ag-menu-option-text', label],
+    ['ag-menu-option-shortcut', ''],
+    ['ag-menu-option-popup-pointer', ''],
+  ];
+  for (const [cls, text] of parts) {
+    const span = document.createElement('span');
+    span.className = `ag-menu-option-part ${cls}`;
+    span.textContent = text;
+    item.appendChild(span);
+  }
+
+  const separator = document.createElement('div');
+  separator.className = `ag-menu-separator ${PIVOT.MENU_SEPARATOR_CLASS}`;
+  separator.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 4; i++) {
+    const part = document.createElement('div');
+    part.className = 'ag-menu-separator-part';
+    separator.appendChild(part);
+  }
+
+  // Otherwise AG Grid sees an outside click and closes its menu first
+  item.addEventListener('mousedown', (ev) => ev.stopPropagation());
+  item.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    onSelect();
+  });
+
+  list.prepend(item, separator);
+}
+
+/**
+ * Escape on the list, then (if still open) a simulated outside mousedown.
+ * Fragile by nature: check after each AG Grid update.
+ */
+export function closeAgGridContextMenu(list: HTMLElement): void {
+  list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+  requestAnimationFrame(() => {
+    if (getOpenAgGridContextMenu()) {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    }
+  });
+}
