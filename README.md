@@ -4,6 +4,24 @@ Userscript Tampermonkey pour **pivoter sur les IOC** directement depuis les rés
 
 Clic droit sur une cellule de résultats -> **Pivot** -> choix d'une query (Statistics/Pivot/Timeline) -> la requête KQL, déjà paramétrée avec la valeur et la date est injectée dans l'éditeur.
 
+## Tutorial
+
+### Select an Indicator
+
+<img width="796" height="540" alt="Indicator Selection" src="https://github.com/user-attachments/assets/ba020b7e-89df-4165-b091-7056e1ba36e2" />
+
+
+### Pivot on it
+
+| Menu | Result |
+| --- | --- |
+| <img width="380" height="500" alt="Menu" src="https://github.com/user-attachments/assets/fb7066a7-6540-407c-91d2-c589b87b87c1" /> | <img width="1728" height="408" alt="Result" src="https://github.com/user-attachments/assets/da24c667-5e49-47ca-9b65-0d6711f8aaad" /> |
+
+### Switch on Defender, keep all history and context
+
+<img width="800" height="390" alt="Switch App" src="https://github.com/user-attachments/assets/167e6115-95cd-41c6-b0f5-63cdb6c3c2c1" />
+
+
 ## Contexte d'investigation
 
 EasyPivot enregistre à chaque pivot, un instantané de l'événement:
