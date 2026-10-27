@@ -83,6 +83,22 @@ export const buttonStyles = `
     display: inline-flex !important;
     align-items: center !important;
     flex-shrink: 0 !important;
+    position: relative !important;
+  }
+
+  /* ── Health diagnostic badge (N6): red dot on the EasyPivot button when a probe fails ── */
+
+  .${CSS_PREFIX}-health-badge::after {
+    content: '' !important;
+    position: absolute !important;
+    top: 1px !important;
+    right: 1px !important;
+    width: 7px !important;
+    height: 7px !important;
+    border-radius: 50% !important;
+    background: var(--colorIconError, #a4262c) !important;
+    border: 1px solid var(--colorContainerBackgroudFloating, #fff) !important;
+    pointer-events: none !important;
   }
 
   /* Divider under the Pivot entry of the Defender cell menu */

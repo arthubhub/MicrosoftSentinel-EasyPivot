@@ -5,6 +5,7 @@ import type {
   PivotParams,
   PivotRule,
   PlatformId,
+  PlatformVariant,
 } from '../types.ts';
 import { PIVOT } from '../config.ts';
 import bundledRulesJson from '../../rules/pivot-rules.json';
@@ -66,10 +67,19 @@ export function getActionLabel(id: PivotActionId): string {
   return catalog.actions[id]?.label ?? id;
 }
 
-/** Rules for an indicator type: v1 first, then by id */
-export function getRulesForIndicator(type: IndicatorId): readonly PivotRule[] {
+/**
+ * Rules for an indicator type: v1 first, then by id.
+ *
+ * `variant` (#7) hides rules whose `platforms` does not list it — a rule
+ * with no `platforms` is assumed compatible with everything. Omitting
+ * `variant` keeps the old unfiltered behaviour (used by
+ * `indicatorHasHostRules`, which cares about all rules regardless of the
+ * current tenant).
+ */
+export function getRulesForIndicator(type: IndicatorId, variant?: PlatformVariant): readonly PivotRule[] {
   return catalog.rules
     .filter((r) => r.indicators.includes(type))
+    .filter((r) => !variant || !r.platforms || r.platforms.includes(variant))
     .sort((a, b) => Number(!!b.v1) - Number(!!a.v1) || a.id.localeCompare(b.id));
 }
 
@@ -89,15 +99,88 @@ const priorityIndex = (id: IndicatorId): number => {
   return i === -1 ? Number.MAX_SAFE_INTEGER : i;
 };
 
-/** Every type with a matching pattern, most specific first */
-export function detectIndicators(value: string): IndicatorId[] {
+/**
+ * ── Phase 1 stopgap for #5 / #6 ──────────────────────────────────────────
+ * The catalogue's `device` regex (`^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}(\.…)*$`)
+ * matches almost any alphanumeric token, and `application` is a bare GUID
+ * regex, so event ids, result codes and correlation/tenant ids currently
+ * masquerade as a hostname or an app id.
+ *
+ * This is NOT the structural fix: that is `core/detection.ts` (#18, phase
+ * 3a), which will resolve a cell's type from the catalogue's `locations`,
+ * then Defender's `Entity` schema, then regex. When #18 lands, delete this
+ * block and the two lists below instead of extending them — a positive
+ * column→type resolver here would conflict with it.
+ *
+ * Only negative signals (suppression), never positive ones:
+ *  - an all-digits value can't be a hostname/domain/account (kills `4624`);
+ *  - a short explicit list of columns that are never a hostname, or hold a
+ *    GUID that is not an app id (kills `Success` in `ResultType`, a
+ *    `CorrelationId` GUID, etc. — these are shape-indistinguishable from a
+ *    real hostname / app id, only the column tells them apart).
+ */
+
+/** Columns that never hold a hostname: ids, activity/result/status/level/action/type fields (#5) */
+const DEVICE_SUPPRESS_COLUMNS = new Set([
+  'eventid',
+  'eventcode',
+  'activitytype',
+  'actiontype',
+  'action',
+  'resulttype',
+  'resultdescription',
+  'resultcode',
+  'status',
+  'statuscode',
+  'statusdescription',
+  'level',
+  'levelname',
+  'operationname',
+  'category',
+  'subcategory',
+  'type',
+]);
+
+/** GUID-bearing columns that are not application ids (#6) */
+const APPLICATION_SUPPRESS_COLUMNS = new Set([
+  'correlationid',
+  'tenantid',
+  'requestid',
+  'operationid',
+  'activityid',
+  'sessionid',
+  'clientrequestid',
+]);
+
+/** Pure digits: never a hostname, a domain or an account */
+const ALL_DIGITS = /^\d+$/;
+
+/**
+ * Every type with a matching pattern, most specific first. `column` is
+ * optional (backward compatible) and only ever removes a match — see the
+ * phase-1 stopgap note above.
+ */
+export function detectIndicators(value: string, column?: string): IndicatorId[] {
   const v = value.trim();
   if (!v) return [];
   const matches: IndicatorId[] = [];
   for (const [id, patterns] of compiledPatterns) {
     if (patterns.some((re) => re.test(v))) matches.push(id);
   }
-  return matches.sort((a, b) => priorityIndex(a) - priorityIndex(b));
+
+  let kept = matches;
+  if (ALL_DIGITS.test(v)) {
+    kept = kept.filter((id) => id !== 'device' && id !== 'domain' && id !== 'account');
+  }
+  const col = column?.trim().toLowerCase();
+  if (col && DEVICE_SUPPRESS_COLUMNS.has(col)) {
+    kept = kept.filter((id) => id !== 'device');
+  }
+  if (col && APPLICATION_SUPPRESS_COLUMNS.has(col)) {
+    kept = kept.filter((id) => id !== 'application');
+  }
+
+  return kept.sort((a, b) => priorityIndex(a) - priorityIndex(b));
 }
 
 // ── Query filling ──

@@ -1,12 +1,32 @@
-import type { MonacoEditorInstance, PlatformAdapter } from '../types.ts';
+import type { MonacoEditorInstance, PlatformAdapter, PlatformHealthProbes } from '../types.ts';
 import { SELECTORS } from '../config.ts';
-import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
+import { getMonacoEditorCount, getMonacoEditorInstance } from '../core/editor-bridge.ts';
+import { cellMenuProbe, createResultsGridProbe, editorCountProbe, landmarkProbe } from '../core/health.ts';
 import {
   addFluentMenuItem,
   closeFluentContextMenu,
   getOpenFluentContextMenu,
   readFluentCellContext,
 } from './fluent-grid.ts';
+
+const D = SELECTORS.DEFENDER;
+
+/** Own closure state (has the grid ever rendered this session?), see core/health.ts */
+const resultsGridProbe = createResultsGridProbe();
+
+/**
+ * DOM-touching diagnostic probes (N6, #12). Defender has no separate
+ * "wrapper" landmark: the Run button itself is also used to detect the
+ * hunting page (same selector as `isHuntingPage()` below).
+ */
+const healthProbes: PlatformHealthProbes = {
+  queryPage: () => landmarkProbe(document.querySelector(D.RUN_BUTTON) !== null),
+  editor: () => editorCountProbe(getMonacoEditorCount()),
+  resultsGrid: () => resultsGridProbe(document.querySelector(D.GRID_ROW) !== null),
+  cellMenu: cellMenuProbe,
+  runButton: () => landmarkProbe(document.querySelector(D.RUN_BUTTON) !== null),
+  buttonAnchor: () => landmarkProbe(document.querySelector(D.BUTTON_ANCHOR)?.parentElement != null),
+};
 
 /**
  * MS Defender (security.microsoft.com) platform adapter.
@@ -47,4 +67,6 @@ export const defenderAdapter: PlatformAdapter = {
   addContextMenuItem: addFluentMenuItem,
 
   closeContextMenu: closeFluentContextMenu,
+
+  healthProbes,
 };

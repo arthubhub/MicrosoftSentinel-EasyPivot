@@ -1,12 +1,28 @@
-import type { MonacoEditorInstance, PlatformAdapter } from '../types.ts';
+import type { MonacoEditorInstance, PlatformAdapter, PlatformHealthProbes } from '../types.ts';
 import { SELECTORS } from '../config.ts';
-import { getMonacoEditorInstance } from '../core/editor-bridge.ts';
+import { getMonacoEditorCount, getMonacoEditorInstance } from '../core/editor-bridge.ts';
+import { cellMenuProbe, createResultsGridProbe, editorCountProbe, landmarkProbe } from '../core/health.ts';
 import {
   addAgGridMenuItem,
   closeAgGridContextMenu,
   getOpenAgGridContextMenu,
   readAgGridCellContext,
 } from './ag-grid.ts';
+
+const S = SELECTORS.SENTINEL;
+
+/** Own closure state (has the grid ever rendered this session?), see core/health.ts */
+const resultsGridProbe = createResultsGridProbe();
+
+/** DOM-touching diagnostic probes (N6, #12); logic shared via core/health.ts */
+const healthProbes: PlatformHealthProbes = {
+  queryPage: () => landmarkProbe(document.querySelector(S.DISCOVER_WRAPPER) !== null),
+  editor: () => editorCountProbe(getMonacoEditorCount()),
+  resultsGrid: () => resultsGridProbe(document.querySelector(S.GRID_ROOT) !== null),
+  cellMenu: cellMenuProbe,
+  runButton: () => landmarkProbe(document.querySelector(S.RUN_BUTTON) !== null),
+  buttonAnchor: () => landmarkProbe(document.querySelector(S.KQL_PANEL) !== null),
+};
 
 /**
  * MS Sentinel (Azure Portal) platform adapter.
@@ -51,4 +67,6 @@ export const sentinelAdapter: PlatformAdapter = {
   addContextMenuItem: addAgGridMenuItem,
 
   closeContextMenu: closeAgGridContextMenu,
+
+  healthProbes,
 };

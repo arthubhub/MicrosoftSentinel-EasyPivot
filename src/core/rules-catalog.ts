@@ -8,6 +8,9 @@ import {
 import { getCacheEntry, setCache, deleteKey } from './storage.ts';
 import { BUNDLED_CATALOG, setCatalog, getCatalog } from './pivot.ts';
 import { isFullCatalog, normalizeCatalog } from './catalog-format.ts';
+import { validateCatalog } from './catalog-validate.ts';
+import { log } from './log.ts';
+import { t } from '../i18n/index.ts';
 
 /**
  * Pivot rules catalog lifecycle:
@@ -16,7 +19,9 @@ import { isFullCatalog, normalizeCatalog } from './catalog-format.ts';
  * 2. if the cache is missing or older than CACHE_TTL_MS, the catalog is
  *    downloaded in the background and applied when it arrives;
  * 3. a download that fails or is invalid keeps whatever is in place.
- * Both formats of the rules repo are accepted (see catalog-format.ts).
+ * Both formats of the rules repo are accepted (see catalog-format.ts), and
+ * whatever comes out of it is validated (see catalog-validate.ts): blocking
+ * problems reject the catalog, the rest becomes `status.warnings`.
  */
 
 export type CatalogSource = 'bundled' | 'cache' | 'remote';
@@ -29,6 +34,8 @@ export interface CatalogStatus {
   /** When the active catalog was downloaded (0 for the bundled one) */
   readonly fetchedAt: number;
   readonly error: string;
+  /** Non-blocking problems of the active catalog (shown in the settings) */
+  readonly warnings: readonly string[];
 }
 
 interface CachedCatalog {
@@ -36,13 +43,19 @@ interface CachedCatalog {
   readonly catalog: PivotCatalog;
 }
 
-let status: CatalogStatus = makeStatus('bundled', '', 0, '');
+let status: CatalogStatus = makeStatus('bundled', '', 0, '', []);
 let inFlight: Promise<CatalogStatus> | null = null;
 const listeners = new Set<() => void>();
 
-function makeStatus(source: CatalogSource, url: string, fetchedAt: number, error: string): CatalogStatus {
+function makeStatus(
+  source: CatalogSource,
+  url: string,
+  fetchedAt: number,
+  error: string,
+  warnings: readonly string[],
+): CatalogStatus {
   const c = getCatalog();
-  return { source, url, version: c.version, ruleCount: c.rules.length, fetchedAt, error };
+  return { source, url, version: c.version, ruleCount: c.rules.length, fetchedAt, error, warnings };
 }
 
 function setStatus(next: CatalogStatus): CatalogStatus {
@@ -92,24 +105,37 @@ function download(url: string): Promise<unknown> {
         try {
           resolve(JSON.parse(res.responseText));
         } catch {
-          reject(new Error('JSON invalide'));
+          reject(new Error(t('error.invalidJson')));
         }
       },
-      onerror: () => reject(new Error('erreur réseau')),
-      ontimeout: () => reject(new Error('délai dépassé')),
+      onerror: () => reject(new Error(t('error.networkError'))),
+      ontimeout: () => reject(new Error(t('error.timeout'))),
     });
   });
 }
 
-/** Apply the cached catalog of the configured URL, if any. Synchronous. */
+/**
+ * Apply the cached catalog of the configured URL, if any. Synchronous.
+ * The cache is validated too: a script update can narrow the supported
+ * format range. A rejected cache is kept (the user may downgrade), it is
+ * simply not applied — the background refresh then takes over.
+ */
 function applyCached(): { fresh: boolean } {
   const url = getRulesUrl();
   const entry = getCacheEntry<CachedCatalog>(STORAGE_KEYS.RULES_CACHE);
   if (!entry || entry.data?.url !== url || !isFullCatalog(entry.data.catalog)) {
     return { fresh: false };
   }
-  setCatalog(entry.data.catalog);
-  setStatus(makeStatus('cache', url, entry.timestamp, ''));
+  const report = validateCatalog(entry.data.catalog);
+  if (!report.catalog) {
+    log.warn('catalog: cached copy REJECTED by validation, falling back', report.errors);
+    return { fresh: false };
+  }
+  log.info(`catalog: from cache, v${report.catalog.version}, ${report.catalog.rules.length} rules,`
+    + ` ${report.warnings.length} warning(s)`);
+  if (report.warnings.length) log.debug('catalog warnings', report.warnings);
+  setCatalog(report.catalog);
+  setStatus(makeStatus('cache', url, entry.timestamp, '', report.warnings));
   return { fresh: Date.now() - entry.timestamp < CACHE_TTL_MS };
 }
 
@@ -121,11 +147,20 @@ export function refreshCatalog(): Promise<CatalogStatus> {
   inFlight = download(url)
     .then((data) => {
       const catalog = normalizeCatalog(data, BUNDLED_CATALOG);
-      if (!catalog) throw new Error('format de catalogue inattendu');
-      setCatalog(catalog);
-      // Stored normalized (full format), whatever the downloaded format
-      setCache<CachedCatalog>(STORAGE_KEYS.RULES_CACHE, { url, catalog });
-      return setStatus(makeStatus('remote', url, Date.now(), ''));
+      if (!catalog) throw new Error(t('error.unexpectedCatalogFormat'));
+      // Blocking problem: reject, the .catch below keeps the active catalog
+      const report = validateCatalog(catalog);
+      if (!report.catalog) {
+        log.warn('catalog: download REJECTED by validation, keeping the active one', report.errors);
+        throw new Error(t('error.catalogRejected', { reason: report.errors[0] ?? '' }));
+      }
+      log.info(`catalog: downloaded, v${report.catalog.version}, ${report.catalog.rules.length} rules,`
+        + ` ${report.warnings.length} warning(s)`);
+      if (report.warnings.length) log.debug('catalog warnings', report.warnings);
+      setCatalog(report.catalog);
+      // Stored normalized (full format) and sanitized, whatever was downloaded
+      setCache<CachedCatalog>(STORAGE_KEYS.RULES_CACHE, { url, catalog: report.catalog });
+      return setStatus(makeStatus('remote', url, Date.now(), '', report.warnings));
     })
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
@@ -146,8 +181,10 @@ export function initCatalog(): void {
 
 /** After a URL change: drop back to the bundle, then download the new URL. */
 export function reloadCatalog(): Promise<CatalogStatus> {
+  // Not validated: the bundled catalog is ours, checked by the rules repo
+  log.info(`catalog: using the bundled copy, v${BUNDLED_CATALOG.version}, ${BUNDLED_CATALOG.rules.length} rules`);
   setCatalog(BUNDLED_CATALOG);
-  setStatus(makeStatus('bundled', '', 0, ''));
+  setStatus(makeStatus('bundled', '', 0, '', []));
   applyCached();
   return refreshCatalog();
 }

@@ -1,6 +1,9 @@
 import type { CellContext, PlatformAdapter } from '../types.ts';
+import { log } from '../core/log.ts';
 import { CSS_PREFIX, PIVOT } from '../config.ts';
 import { detectIndicators, getIndicatorLabel } from '../core/pivot.ts';
+import { recordCellMenuOutcome } from '../core/health.ts';
+import { t } from '../i18n/index.ts';
 import { createPivotMenu, type PivotMenuComponent } from './pivot-menu.ts';
 
 export interface PivotTriggerComponent {
@@ -49,7 +52,10 @@ export function createPivotTrigger(platform: PlatformAdapter): PivotTriggerCompo
     if (target.closest(`.${CSS_PREFIX}-pivot, .${OPTION_CLASS}`)) return;
 
     let ctx = platform.readCellContext(target);
-    if (!ctx) return;
+    if (!ctx) {
+      log.debug('right-click: not a results cell');
+      return;
+    }
 
     const cell = target.closest('[role="gridcell"]') ?? target;
     const selected = selectionInside(cell);
@@ -88,17 +94,25 @@ export function createPivotTrigger(platform: PlatformAdapter): PivotTriggerCompo
 
   /** Replace (never keep) a previous entry: the context is always the last click's. */
   function addPivotItem(list: HTMLElement, ctx: CellContext, x: number, y: number): void {
+    log.debug('cell read', { column: ctx.column, value: ctx.value, t0: ctx.t0, host: ctx.host,
+      rowFields: Object.keys(ctx.row).length, types: detectIndicators(ctx.value, ctx.column) });
     list
       .querySelectorAll(`.${OPTION_CLASS}, .${PIVOT.MENU_SEPARATOR_CLASS}`)
       .forEach((n) => n.remove());
 
-    const type = detectIndicators(ctx.value)[0];
-    const label = type ? `Pivot · ${getIndicatorLabel(type)}` : 'Pivot';
+    const type = detectIndicators(ctx.value, ctx.column)[0];
+    const label = type ? t('menu.pivotWithType', { label: getIndicatorLabel(type) }) : t('common.pivot');
 
-    platform.addContextMenuItem(list, label, () => {
-      platform.closeContextMenu(list);
-      requestAnimationFrame(() => menu.show(ctx, x, y));
-    });
+    // Diagnostic record only (N6 cell-menu probe): behavior is unchanged,
+    // `finally` lets a real failure of addContextMenuItem still propagate.
+    try {
+      platform.addContextMenuItem(list, label, () => {
+        platform.closeContextMenu(list);
+        requestAnimationFrame(() => menu.show(ctx, x, y));
+      });
+    } finally {
+      recordCellMenuOutcome(list.querySelector(`.${OPTION_CLASS}`) !== null);
+    }
   }
 
   document.addEventListener('contextmenu', onContextMenu, true);

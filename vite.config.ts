@@ -1,7 +1,9 @@
 import { defineConfig, type Plugin } from 'vite';
 import { readFileSync } from 'fs';
 
-const userscriptHeader = readFileSync('./userscript-header.txt', 'utf-8');
+const userscriptHeaderTemplate = readFileSync('./userscript-header.txt', 'utf-8');
+const { version } = JSON.parse(readFileSync('./package.json', 'utf-8')) as { version: string };
+const userscriptHeader = userscriptHeaderTemplate.replace('{{VERSION}}', version);
 
 /**
  * Custom plugin to prepend the userscript header to the built output.
@@ -22,6 +24,12 @@ function userscriptBanner(): Plugin {
 }
 
 export default defineConfig({
+  // Runtime access to the script version (health diagnostic, N6, #12): same
+  // package.json read as the {{VERSION}} header substitution above, so the
+  // two never drift apart.
+  define: {
+    __SCRIPT_VERSION__: JSON.stringify(version),
+  },
   build: {
     lib: {
       entry: 'src/main.ts',
