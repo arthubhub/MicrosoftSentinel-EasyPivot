@@ -6,7 +6,9 @@ import type {
   PlatformAdapter,
 } from '../types.ts';
 import { CSS_PREFIX } from '../config.ts';
-import { detectIndicators, fillQuery, parseDurationMinutes, parseGridTime } from '../core/pivot.ts';
+import { detectForCell } from '../core/detection.ts';
+import { fillQuery, parseDurationMinutes, parseGridTime } from '../core/pivot.ts';
+import { normalize } from '../core/normalize.ts';
 import { getRulesUrl, onCatalogChange, reloadCatalog, setRulesUrl } from '../core/rules-catalog.ts';
 import { resolvePlatformVariant } from '../core/settings.ts';
 import {
@@ -18,6 +20,8 @@ import {
 } from '../core/investigation.ts';
 import { getEditorText, injectQuery, replaceEditorContent } from '../core/editor-bridge.ts';
 import { copyDiagnostics, getHealthReport, onHealthChange, refreshHealth } from '../core/health.ts';
+import { listRecentRuleIds, recordRecentRule } from '../core/recent-rules.ts';
+import { log } from '../core/log.ts';
 import { t } from '../i18n/index.ts';
 import { showToast } from './notification.ts';
 import { P, el, button } from './panel/shared.ts';
@@ -51,6 +55,8 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   /** Snapshot the panel is working on (null = pendingCtx / manual input) */
   let snapshotId: string | null = null;
   let row: Readonly<Record<string, string>> = {};
+  /** Loaded once per panel open (#17), not re-read on every keystroke */
+  let recentRuleIds: readonly string[] = [];
 
   // ── DOM ──
   const overlay = el('div', `${CSS_PREFIX}-popup-overlay`);
@@ -73,7 +79,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   headerActions.append(healthBtn, settingsBtn, closeBtn);
   header.appendChild(headerActions);
 
-  const settingsView = createSettingsView();
+  const settingsView = createSettingsView(() => renderTypes());
   const healthView = createHealthView();
   const contextView = createContextView();
   const paramsView = createParamsView();
@@ -109,6 +115,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       currentSnapshot(),
       paramsView.valueField.input.value.trim(),
       resolvePlatformVariant(platform.id),
+      recentRuleIds,
       runRule,
     );
   }
@@ -157,7 +164,10 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     paramsView.beforeField.input.value = '';
     paramsView.afterField.input.value = '';
     row = c.row;
-    selected = detectIndicators(c.value, c.column)[0] ?? selected;
+    // Not logged here (#18): this runs whenever a context is loaded (show,
+    // history pick), not just on the right-click already logged in
+    // pivot-trigger.ts's addPivotItem.
+    selected = detectForCell(c.value, c.column, c.entityName).candidates[0] ?? selected;
     expanded.clear();
   }
 
@@ -196,7 +206,15 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     }
 
     const host = paramsView.hostField.wrap.hidden ? '' : paramsView.hostField.input.value.trim();
-    const kql = fillQuery(rule, { value, t0, beforeMinutes: before, afterMinutes: after, host }, platform.id);
+    // Type-aware cleanup (#15) right before the value goes into a query —
+    // refang, port/`::ffff:` stripping, hash/domain casing — not earlier,
+    // so the panel still shows what the analyst actually typed/clicked.
+    const normalizedValue = normalize(value, selected);
+    const kql = fillQuery(
+      rule,
+      { value: normalizedValue, t0, beforeMinutes: before, afterMinutes: after, host },
+      platform.id,
+    );
 
     // Journal the event before the editor changes, so its source query is kept
     if (!currentSnapshot()) {
@@ -225,7 +243,9 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       return;
     }
 
-    if (snapshotId) addStep(snapshotId, { ruleId: rule.id, value, indicator: selected });
+    if (snapshotId) addStep(snapshotId, { ruleId: rule.id, value: normalizedValue, indicator: selected });
+    recordRecentRule(rule.id);
+    recentRuleIds = listRecentRuleIds();
     hide();
   }
 
@@ -266,6 +286,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     if (settingsOpen) {
       settingsView.urlField.input.value = getRulesUrl();
       renderStatus();
+      settingsView.renderTi();
     }
   });
 
@@ -349,12 +370,19 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       visible = true;
     }
     position(x, y);
-    rulesView.root.scrollTop = 0;
+    rulesView.resetView();
+  }
+
+  /** Read once per open (#17), before renderAll() so renderRules() sees it right away */
+  function loadRecentRules(): void {
+    recentRuleIds = listRecentRuleIds();
+    log.debug(`recent rules: ${recentRuleIds.length} loaded`);
   }
 
   function show(ctx: CellContext, x: number, y: number): void {
     pendingCtx = ctx;
     snapshotId = null;
+    loadRecentRules();
     fill(ctx);
     renderAll();
     open(x, y);
@@ -362,6 +390,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
   function showHistory(x: number, y: number): void {
     pendingCtx = null;
+    loadRecentRules();
     const latest = listSnapshots()[0];
     if (latest) {
       snapshotId = latest.id;

@@ -29,6 +29,23 @@ function valueOf(el: Element): string {
   return (el.textContent ?? '').trim();
 }
 
+/**
+ * Defender's own declared entity type for this cell (`context-data-schema`,
+ * e.g. `{"name":"RemoteIP","type":"IPAddress","entityName":"Ip"}`). Used by
+ * `core/detection.ts` (#18). The attribute is JSON written by the page, so a
+ * malformed or absent value must not break the rest of the cell read.
+ */
+function entityNameOf(el: Element): string | undefined {
+  const raw = el.getAttribute('context-data-schema');
+  if (!raw) return undefined;
+  try {
+    const schema = JSON.parse(raw) as { entityName?: unknown };
+    return typeof schema.entityName === 'string' && schema.entityName ? schema.entityName : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Every cell of the row (column → value) */
 function readRow(rowEl: Element): Record<string, string> {
   const row: Record<string, string> = {};
@@ -73,7 +90,9 @@ export function readFluentCellContext(target: Element): CellContext | null {
   const hostCol = PIVOT.HOST_COLUMNS.find((c) => row[c]);
   const host = hostCol ? row[hostCol] : '';
 
-  return { value, column, t0, t0Raw, host, row };
+  const entityName = entityNameOf(valueEl);
+
+  return { value, column, t0, t0Raw, host, row, entityName };
 }
 
 /** The most recently opened cell menu */

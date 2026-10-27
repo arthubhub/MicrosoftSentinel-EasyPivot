@@ -49,6 +49,18 @@ export function getCatalog(): PivotCatalog {
   return catalog;
 }
 
+/**
+ * Does this type's own catalogue regex match the value? Exposed for
+ * `core/detection.ts` (#18), which uses it as the value-shape test that
+ * narrows `locations`/Entity candidates (e.g. a UPN column without `@` must
+ * not offer `email`). Reuses the same compiled patterns as `detectIndicators`
+ * below, so the two never disagree on what a given type looks like.
+ */
+export function matchesPattern(type: IndicatorId, value: string): boolean {
+  const patterns = compiledPatterns.get(type);
+  return patterns ? patterns.some((re) => re.test(value)) : false;
+}
+
 export function setCatalog(next: PivotCatalog): void {
   catalog = next;
   compiledPatterns = compilePatterns(next);
@@ -100,17 +112,21 @@ const priorityIndex = (id: IndicatorId): number => {
 };
 
 /**
- * ── Phase 1 stopgap for #5 / #6 ──────────────────────────────────────────
- * The catalogue's `device` regex (`^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}(\.…)*$`)
- * matches almost any alphanumeric token, and `application` is a bare GUID
- * regex, so event ids, result codes and correlation/tenant ids currently
- * masquerade as a hostname or an app id.
+ * ── Phase 1 stopgap for #5 / #6 — KEPT after #18 ─────────────────────────
+ * The catalogue's `device` regex (`^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}(\.…)*$`,
+ * tightened 23/10 but still permissive) and `application`'s bare GUID regex
+ * mean event ids, result codes and correlation/tenant ids can masquerade as
+ * a hostname or an app id whenever `detectIndicators` runs on its own.
  *
- * This is NOT the structural fix: that is `core/detection.ts` (#18, phase
- * 3a), which will resolve a cell's type from the catalogue's `locations`,
- * then Defender's `Entity` schema, then regex. When #18 lands, delete this
- * block and the two lists below instead of extending them — a positive
- * column→type resolver here would conflict with it.
+ * `core/detection.ts` (#18, phase 3a) is the structural fix, but only for
+ * columns `locations` (or Defender's `Entity`) actually covers: `Success` /
+ * `Failure` contain letters, so no regex tightening can exclude them from
+ * `device`, and plenty of columns (e.g. `ResultType`) are not in `locations`
+ * at all. `detectIndicators` below is `detectForCell`'s last-resort step
+ * (regex fallback, used only when neither `locations` nor `Entity` cover the
+ * column) and is exercised directly wherever a column is unknown — so this
+ * stopgap stays. Do not extend it with positive column→type resolution:
+ * that is `locations`' job now.
  *
  * Only negative signals (suppression), never positive ones:
  *  - an all-digits value can't be a hostname/domain/account (kills `4624`);

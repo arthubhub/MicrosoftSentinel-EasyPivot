@@ -11,6 +11,8 @@ export const STORAGE_KEYS = {
   SNAPSHOTS: 'shq_pivot_snapshots',
   /** User settings (single JSON blob, see core/settings.ts) */
   SETTINGS: 'shq_settings',
+  /** Last launched rule ids, newest first (#17, see core/recent-rules.ts) */
+  RECENT_RULES: 'shq_recent_rules',
 } as const;
 
 // ── Pivot rules catalog ──
@@ -32,6 +34,10 @@ export const SNAPSHOTS = {
   /** Row cells longer than this are truncated */
   MAX_CELL_CHARS: 2000,
 } as const;
+
+// ── Recent rules (#17) ──
+/** Oldest recent rule ids are dropped beyond this count */
+export const RECENT_RULES_MAX = 10;
 
 // ── Platform-specific Selectors ──
 export const SELECTORS = {
