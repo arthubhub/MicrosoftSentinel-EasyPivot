@@ -4,10 +4,13 @@ import { detectPlatform, getPlatformAdapter } from './platforms/index.ts';
 import { injectStyles } from './styles/index.ts';
 import { initTheme } from './styles/theme.ts';
 import { initCatalog } from './core/rules-catalog.ts';
-import { getHealthReport, hasFailure, onHealthChange, refreshHealth } from './core/health.ts';
+import { getHealthReport, hasFailure, onHealthChange, onQueryCaptured, refreshHealth } from './core/health.ts';
 import { teardownActiveEditorTracking } from './core/editor-bridge.ts';
 import { log } from './core/log.ts';
 import { initI18n } from './i18n/index.ts';
+import { installCapture, onCaptureResult } from './capture/interceptor.ts';
+import { sentinelProfile } from './capture/profiles/sentinel.ts';
+import { defenderProfile } from './capture/profiles/defender.ts';
 import { createButton, type ButtonComponent } from './ui/button.ts';
 import { createPivotTrigger, type PivotTriggerComponent } from './ui/pivot-trigger.ts';
 
@@ -26,15 +29,6 @@ let startupHealthTimer: ReturnType<typeof setTimeout> | null = null;
 // ── Bootstrap ──
 
 function bootstrap(): void {
-  const platformId = detectPlatform();
-  if (!platformId) {
-    log.debug('no platform matched for', location.host, '- not starting');
-    return;
-  }
-
-  platform = getPlatformAdapter(platformId);
-  log.info(`starting on ${platformId}`, { host: location.host, frame: window === window.top ? 'top' : 'iframe' });
-
   // Language is resolved before anything renders text (W1 start-up order)
   log.step('initI18n', initI18n);
   log.step('initTheme', initTheme);
@@ -202,13 +196,39 @@ function isAlreadyRunning(): boolean {
 }
 
 // ── Entry Point ──
+//
+// W1 start-up order: detectPlatform() -> installCapture() (immediately, at
+// document-start, before DOMContentLoaded) -> wait for document.body ->
+// the rest of bootstrap(). This way a query fired by the page before our
+// UI exists is still captured (interceptor.ts patches XHR/fetch
+// synchronously, long before the first paint).
 
 (function main() {
   if (isAlreadyRunning()) return;
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrap);
-  } else {
+  const platformId = detectPlatform();
+  if (!platformId) {
+    log.debug('no platform matched for', location.host, '- not starting');
+    return;
+  }
+  platform = getPlatformAdapter(platformId);
+  log.info(`starting on ${platformId}`, { host: location.host, frame: window === window.top ? 'top' : 'iframe' });
+
+  log.step('installCapture', () => installCapture([sentinelProfile, defenderProfile]));
+
+  // N6 third trigger ("après chaque requête capturée", 4g): forward every
+  // matched request - parsed or not - into a probe refresh, so Capture and
+  // Results grid reflect it without waiting for the next manual/startup
+  // check. `platform` is already set above and stays the same adapter for
+  // the lifetime of this page, same as every other `onHealthChange`/
+  // `refreshHealth` caller in this file.
+  onCaptureResult(() => {
+    if (platform) onQueryCaptured(platform);
+  });
+
+  if (document.body) {
     bootstrap();
+  } else {
+    document.addEventListener('DOMContentLoaded', bootstrap);
   }
 })();

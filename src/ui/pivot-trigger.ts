@@ -4,6 +4,7 @@ import { CSS_PREFIX, PIVOT } from '../config.ts';
 import { detectForCell } from '../core/detection.ts';
 import { getIndicatorLabel } from '../core/pivot.ts';
 import { recordCellMenuOutcome } from '../core/health.ts';
+import { clearLastCapture, getLastCapture } from '../capture/interceptor.ts';
 import { t } from '../i18n/index.ts';
 import { createPivotMenu, type PivotMenuComponent } from './pivot-menu.ts';
 
@@ -93,11 +94,25 @@ export function createPivotTrigger(platform: PlatformAdapter): PivotTriggerCompo
     rafId = requestAnimationFrame(tick);
   }
 
+  /**
+   * The captured run's `sourceTables`, only when `ctx` was itself resolved
+   * from that SAME run (`source === 'capture'` and the cache still holds
+   * that exact `runId` - a different query may have run between the
+   * right-click and now). Undefined otherwise, which keeps
+   * `detectForCell()` on its unchanged column-name-only path (#18).
+   */
+  function sourceTablesFor(ctx: CellContext): readonly string[] | undefined {
+    if (ctx.source !== 'capture' || !ctx.runId) return undefined;
+    const cached = getLastCapture(platform.id);
+    return cached && cached.runId === ctx.runId ? cached.sourceTables : undefined;
+  }
+
   /** Replace (never keep) a previous entry: the context is always the last click's. */
   function addPivotItem(list: HTMLElement, ctx: CellContext, x: number, y: number): void {
     // One detection per right-click (#18): logged here, not inside the pure
     // detectForCell(), which also runs silently inside render loops below.
-    const detection = detectForCell(ctx.value, ctx.column, ctx.entityName);
+    const sourceTables = sourceTablesFor(ctx);
+    const detection = detectForCell(ctx.value, ctx.column, ctx.entityName, sourceTables);
     log.debug('cell detection', {
       column: ctx.column,
       value: ctx.value,
@@ -105,6 +120,9 @@ export function createPivotTrigger(platform: PlatformAdapter): PivotTriggerCompo
       t0: ctx.t0,
       host: ctx.host,
       rowFields: Object.keys(ctx.row).length,
+      rowSource: ctx.source,
+      runId: ctx.runId,
+      sourceTables,
       tier: detection.tier,
       candidates: detection.candidates,
     });
@@ -136,6 +154,10 @@ export function createPivotTrigger(platform: PlatformAdapter): PivotTriggerCompo
       cancelAnimationFrame(rafId);
       document.removeEventListener('contextmenu', onContextMenu, true);
       document.removeEventListener('click', onClick, true);
+      // 4e: the in-memory row cache is scoped to "this hunting-page view"
+      // (never persisted) - this is that view's one teardown boundary
+      // (main.ts's removeUI() on SPA navigation away from the page).
+      clearLastCapture();
       menu.destroy();
     },
   };

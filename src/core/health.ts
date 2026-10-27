@@ -11,6 +11,9 @@ import { copyText } from './editor-bridge.ts';
 import { getCatalogStatus } from './rules-catalog.ts';
 import { resolvePlatformVariant, getSetting } from './settings.ts';
 import { estimateStorageBytes } from './storage.ts';
+import { isUnknownTenantKey } from './tenant.ts';
+import { getCaptureStats, onCaptureResult } from '../capture/interceptor.ts';
+import { getLastResolvedTenantKey } from '../capture/store.ts';
 import { t, type MessageKey } from '../i18n/index.ts';
 
 /**
@@ -20,10 +23,9 @@ import { t, type MessageKey } from '../i18n/index.ts';
  *
  * DOM-touching probes live in each adapter's `healthProbes`
  * (src/platforms/sentinel.ts, src/platforms/defender.ts); this module
- * orchestrates them plus the two DOM-free probes (catalog, storage) and the
- * two probes this phase does not implement (capture, tenant key - phase 4
- * item 4g: they need the capture layer and core/tenant.ts, neither of which
- * exists yet). Those two are reported `pending`, never a fabricated `ok`.
+ * orchestrates them plus the DOM-free probes: catalog, storage, and - since
+ * 4g - capture and tenant key, backed by `capture/interceptor.ts`'s stats
+ * and `capture/store.ts`'s last resolved `TenantKey`.
  */
 
 export interface HealthReport {
@@ -127,10 +129,49 @@ function storageProbe(): ProbeOutcome {
   return { state: 'fail', message: t('health.storage.fail', { pct }) };
 }
 
-// ── Deferred probes (phase 4, item 4g) ──
+// ── Capture (N6, 4g) ──
+//
+// Three situations, must not be conflated (N6 + phase-4 report):
+//   - disabled by setting: a deliberate choice, not a failure -> `warn`
+//     (not `ok`: the capture feature genuinely is not running, and this
+//     probe should say so without raising a false alarm).
+//   - enabled, nothing matched yet (page just loaded, no query run) -> `warn`,
+//     same "not yet" shape as the Grid/Menu probes above.
+//   - enabled, at least one matched request parsed into a result -> `ok`.
+//   - enabled, a matched request produced NO `ParsedResult` -> `fail`: the
+//     real signal that the portal's endpoint/response shape moved and a
+//     profile stopped matching it.
+// `unparsed > 0` wins over `parsed > 0`: one broken parse is worth
+// surfacing even if earlier requests this session still worked.
+function captureProbe(): ProbeOutcome {
+  let enabled: boolean;
+  try {
+    enabled = getSetting('capture').enabled;
+  } catch {
+    enabled = true; // a broken setting read must not hide a real probe result
+  }
+  if (!enabled) return { state: 'warn', message: t('health.capture.disabled') };
 
-function pendingProbe(): ProbeOutcome {
-  return { state: 'pending', message: t('health.pending') };
+  const { parsed, unparsed } = getCaptureStats();
+  if (unparsed > 0) return { state: 'fail', message: t('health.capture.unparsed', { n: unparsed }) };
+  if (parsed > 0) return { state: 'ok', message: t('health.capture.ok', { n: parsed }) };
+  return { state: 'warn', message: t('health.capture.notYet') };
+}
+
+// ── Tenant key (N6, 4g) ──
+//
+// `sentinelKey`/`defenderKey` (core/tenant.ts) are async; this probe is not,
+// so it reads the key `capture/store.ts` already resolved for the most
+// recent captured request rather than awaiting a fresh one. `warn`, never
+// `fail`, on an absent key (N2 point 4: pivot stays allowed, routed to an
+// "unassigned" case) - and no value or hash in the message either way
+// (hard constraint: the diagnostics text stays value-free).
+function tenantKeyProbe(): ProbeOutcome {
+  const key = getLastResolvedTenantKey();
+  if (key !== null && !isUnknownTenantKey(key)) {
+    return { state: 'ok', message: t('health.tenantKey.ok') };
+  }
+  return { state: 'warn', message: t('health.tenantKey.warn') };
 }
 
 // ── Runner ──
@@ -154,8 +195,8 @@ export function runHealthProbes(platform: PlatformAdapter): HealthReport {
     safe('buttonAnchor', () => p.buttonAnchor()),
     safe('catalog', catalogProbe),
     safe('storage', storageProbe),
-    safe('capture', pendingProbe), // 4g
-    safe('tenantKey', pendingProbe), // 4g
+    safe('capture', captureProbe), // 4g
+    safe('tenantKey', tenantKeyProbe), // 4g
   ];
   return { platformId: platform.id, generatedAt: Date.now(), probes };
 }
@@ -186,13 +227,17 @@ export function refreshHealth(platform: PlatformAdapter): HealthReport {
 }
 
 /**
- * Third N6 trigger ("after each captured query"): not wired yet, the
- * capture layer does not exist (phase 4). Call this from capture/store.ts
- * once a QueryRun is recorded, so the Results grid / Capture probes reflect
- * the query that was just seen.
+ * Third N6 trigger ("after each captured query"): wired in 4g from
+ * `main.ts`, which subscribes to `capture/interceptor.ts`'s
+ * `onCaptureResult()` and calls this function. Not subscribed from inside
+ * this module: `core/health.ts` is only ever handed a `PlatformAdapter` by
+ * its caller (see `refreshHealth`, `runHealthProbes`) and keeps no
+ * module-level reference of its own - `main.ts` already holds the active
+ * one as bootstrap state, so it is the natural place to forward the event.
+ * Fires once per matched request, parsed or not (see `captureProbe()`).
  */
-export function onQueryCaptured(_platform: PlatformAdapter): void {
-  // phase 4: void refreshHealth(_platform);
+export function onQueryCaptured(platform: PlatformAdapter): void {
+  void refreshHealth(platform);
 }
 
 // ── Script version (same package.json source as the {{VERSION}} header, #8) ──

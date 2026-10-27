@@ -104,6 +104,8 @@ export const fr = {
   'notify.invalidT0': 'T0 invalide : format ISO attendu (2026-10-08T09:21:14Z)',
   'notify.timeSelectorHint': ' Sélecteur de temps : « Set in query »',
   'notify.ruleInjected': '{id} injectée.{hint}',
+  'notify.ruleInjectedNewTabFallback':
+    '{id} injectée (nouvel onglet indisponible : un seul éditeur partagé par les onglets, ajoutée à la suite).{hint}',
   'notify.ruleCopied': '{id} copiée dans le presse-papier',
   'notify.injectFailed': "Impossible d'injecter la requête",
   'notify.clipboardDenied': 'Accès au presse-papier refusé, requête non copiée',
@@ -180,7 +182,22 @@ export const fr = {
   'health.storage.ok': '{pct} % utilisé',
   'health.storage.warn': '{pct} % utilisé (seuil 80 % dépassé)',
   'health.storage.fail': 'quota dépassé ({pct} %)',
-  'health.pending': 'non disponible (phase 4)',
+  'health.capture.disabled': 'capture désactivée (réglage)',
+  'health.capture.notYet': 'aucune requête de capture observée encore',
+  'health.capture.ok': '{n} requête(s) capturée(s) depuis le chargement',
+  'health.capture.unparsed': 'requête vue mais non analysée ({n})',
+  'health.tenantKey.ok': 'clé de tenant résolue',
+  'health.tenantKey.warn': 'aucune clé de tenant résolue (pivot toujours possible)',
+  // ── Stockage de la capture (purge N1) ──
+  'settings.purge.title': 'Stockage de la capture',
+  'settings.sanitize.label': 'Masquer les valeurs stockées',
+  'settings.sanitize.hint':
+    'Chiffres et lettres remplacés au hasard, la forme est conservée (1.2.3.4 reste une IP). '
+    + 'Ne touche que les requêtes capturées à partir de maintenant.',
+  'settings.purge.button': 'Purger maintenant',
+  'settings.purge.size': '{mb} Mo utilisés par les résultats capturés',
+  'settings.purge.done':
+    'Purge faite : {samples} échantillon(s) et {runs} requête(s) supprimés, {mb} Mo restants',
 } as const;
 
 /** Every valid key for `t()`, derived from the French reference dictionary. */

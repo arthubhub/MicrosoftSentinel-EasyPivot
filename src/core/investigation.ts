@@ -99,6 +99,11 @@ export function recordSnapshot(
     t0Raw: ctx.t0Raw,
     host: ctx.host,
     row,
+    // 4e: keep the row's provenance in the snapshot too (same reasoning as
+    // the existing fields above - the snapshot is "the context of a pivot",
+    // and how the row was obtained is part of that context).
+    source: ctx.source,
+    runId: ctx.runId,
     sourceQuery: source,
     originRuleId: findOriginRuleId(source),
     steps: [],

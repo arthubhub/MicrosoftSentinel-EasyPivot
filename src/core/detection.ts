@@ -129,6 +129,56 @@ function getColumnIndex(catalog: PivotCatalog): NonNullable<typeof columnIndex> 
   return columnIndex;
 }
 
+// ── Table-aware index (#18, phase 4e) ──
+//
+// `locations` entries ARE `Table.Column` strings already - `buildColumnIndex`
+// above just discards the table part because `CellContext` had no table
+// before phase 4. Tier 1 of W2 step 2 (capture/match-row.ts) can now supply
+// a captured run's `sourceTables`, so a SECOND index, keyed by the FULL
+// `table.column` (lowercased), lets a cell be resolved against the exact
+// table it came from instead of every table that happens to share a column
+// name. No new data: same `locations`/`locationsConfirmed`, just a
+// different key granularity.
+//
+// Deliberately NOT merged into `buildColumnIndex`'s single pass result:
+// keeping two separate maps keeps `detectForCell` honest about exactly
+// which one it is consulting (see the "one table, known" branch below),
+// rather than one map silently serving both granularities.
+
+function buildTableColumnIndex(catalog: PivotCatalog): Map<string, { confirmed: Set<IndicatorId>; uncertain: Set<IndicatorId> }> {
+  const index = new Map<string, { confirmed: Set<IndicatorId>; uncertain: Set<IndicatorId> }>();
+  const locations = catalog.locations ?? {};
+  const confirmedCounts = catalog.locationsConfirmed ?? {};
+
+  for (const [type, entries] of Object.entries(locations) as [IndicatorId, readonly string[] | undefined][]) {
+    const list = entries ?? [];
+    const confirmedN = Math.min(confirmedCounts[type] ?? 0, list.length);
+
+    list.forEach((entry, i) => {
+      if (entry.indexOf('.') < 0) return; // no table part to index at this granularity
+      const key = entry.trim().toLowerCase();
+      let tiers = index.get(key);
+      if (!tiers) {
+        tiers = { confirmed: new Set(), uncertain: new Set() };
+        index.set(key, tiers);
+      }
+      if (i < confirmedN) tiers.confirmed.add(type);
+      else if (!tiers.confirmed.has(type)) tiers.uncertain.add(type);
+    });
+  }
+  return index;
+}
+
+let indexedTableCatalog: PivotCatalog | null = null;
+let tableColumnIndex: ReturnType<typeof buildTableColumnIndex> | null = null;
+
+function getTableColumnIndex(catalog: PivotCatalog): NonNullable<typeof tableColumnIndex> {
+  if (tableColumnIndex && indexedTableCatalog === catalog) return tableColumnIndex;
+  tableColumnIndex = buildTableColumnIndex(catalog);
+  indexedTableCatalog = catalog;
+  return tableColumnIndex;
+}
+
 // ── Detection ──
 
 // ── Which types the shape test may actually veto ──
@@ -155,15 +205,47 @@ function keepByShape(id: IndicatorId, value: string): boolean {
  * `value` is pre-normalized internally so a defanged value (`hxxp://…`)
  * still passes the shape test and so callers never have to remember to call
  * `preNormalize()` themselves before detection.
+ *
+ * `sourceTables` (#18, phase 4e): the captured run's tables, when tier 1 of
+ * W2 step 2 resolved this row. Used ONLY when it names EXACTLY ONE table -
+ * a `union` over several tables says nothing about which one produced THIS
+ * row (nothing in the response ties a row to a source table), so a table is
+ * NEVER guessed from a multi-table `sourceTables`: that case, and the
+ * zero-table case, both fall back to today's column-name-only index
+ * unchanged. When unambiguous, the table-qualified lookup REPLACES the
+ * column-only one for this cell (not merged with it) - that is the whole
+ * point: a column name that collides across tables with different
+ * semantics must stop leaking a wrong type in once the table is known, even
+ * if that means this cell now resolves to nothing from `locations`.
  */
-export function detectForCell(value: string, column: string, entityName?: string): CellDetection {
+export function detectForCell(
+  value: string,
+  column: string,
+  entityName?: string,
+  sourceTables?: readonly string[],
+): CellDetection {
   const v = preNormalize(value);
   if (!v) return { candidates: [], tier: 'none' };
 
   const catalog = getCatalog();
   const order = getIndicatorIds(); // catalogue key order; NOT INDICATOR_PRIORITY
+
+  // A known table makes the lookup more precise, but it must never make it
+  // WORSE. `locations` holds ~793 Table.Column pairs over 105 tables, so most
+  // table/column combinations are simply absent from it - and an earlier
+  // version REPLACED the column-only lookup with the table-qualified one, so a
+  // miss fell straight through to the regex tier. Measured: `AccountUpn` alone
+  // resolved [account, email] at locations-confirmed, while `AccountUpn` with
+  // sourceTables ['SigninLogs'] dropped to the regex tier - supplying more
+  // information produced a worse answer. So the table-qualified hit is a
+  // PREFERENCE, and the column-only index is the fallback beneath it.
   const key = column.trim().toLowerCase();
-  const tiers: ColumnTiers | undefined = key ? getColumnIndex(catalog).get(key) : undefined;
+  let tiers: ColumnTiers | undefined;
+  if (sourceTables && sourceTables.length === 1) {
+    const fullKey = `${sourceTables[0]}.${column}`.trim().toLowerCase();
+    tiers = getTableColumnIndex(catalog).get(fullKey);
+  }
+  if (!tiers && key) tiers = getColumnIndex(catalog).get(key);
 
   const confirmed: IndicatorId[] = [];
   const uncertain: IndicatorId[] = [];

@@ -21,4 +21,5 @@
 // @connect      raw.githubusercontent.com
 // @connect      *
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=security.microsoft.com
+// @run-at       document-start
 // ==/UserScript==

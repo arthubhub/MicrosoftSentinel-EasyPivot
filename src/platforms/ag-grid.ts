@@ -1,6 +1,9 @@
 import type { CellContext } from '../types.ts';
 import { PIVOT, SELECTORS } from '../config.ts';
 import { parseGridTime } from '../core/pivot.ts';
+import { log } from '../core/log.ts';
+import { getLastCapture } from '../capture/interceptor.ts';
+import { matchCapturedRow, stringifyCell } from '../capture/match-row.ts';
 
 /**
  * Reading the Sentinel results grid (AG Grid).
@@ -70,6 +73,67 @@ function isUtcColumn(grid: Element, col: string): boolean {
   return !/local/i.test(text);
 }
 
+/**
+ * Tier 2 of W2 step 2 (#14): AG Grid's own row data, bypassing the
+ * virtualized DOM entirely (the limit this function exists to work around
+ * - see the file header). AG Grid does not expose a stable, documented way
+ * to reach its `GridApi` from the DOM alone; this is a best-effort,
+ * duck-typed scan for an object that LOOKS like one (has
+ * `getDisplayedRowAtIndex`), walking a few ancestors from the grid root
+ * and checking their own enumerable properties (plus one level of `.api`/
+ * `.gridApi` nesting, a common wrapper shape).
+ *
+ * **Not verified against a live grid this session** (no browser available):
+ * if Sentinel's AG Grid instance is not reachable this way, this always
+ * returns `null` and tier 3 (DOM, below) takes over - exactly the
+ * capture-disabled/empty behaviour, so a wrong guess here can only ever
+ * fall through, never corrupt a result (constraint: no DOM-tier
+ * regression). Confirm in a real session and fix the lookup if it never
+ * fires in practice.
+ */
+function findGridApi(root: Element): { getDisplayedRowAtIndex(i: number): { data?: unknown } | null } | null {
+  type MaybeApi = { getDisplayedRowAtIndex?: unknown };
+  const looksLikeApi = (v: unknown): v is { getDisplayedRowAtIndex(i: number): { data?: unknown } | null } =>
+    typeof v === 'object' && v !== null && typeof (v as MaybeApi).getDisplayedRowAtIndex === 'function';
+
+  let el: Element | null = root;
+  for (let depth = 0; el && depth < 4; depth++, el = el.parentElement) {
+    const own = el as unknown as Record<string, unknown>;
+    for (const key of Object.keys(own)) {
+      const candidate = own[key];
+      if (looksLikeApi(candidate)) return candidate;
+      if (candidate && typeof candidate === 'object') {
+        const nested = (candidate as Record<string, unknown>).api ?? (candidate as Record<string, unknown>).gridApi;
+        if (looksLikeApi(nested)) return nested;
+      }
+    }
+  }
+  return null;
+}
+
+function readAgGridRowData(grid: Element, rowIndex: string): Record<string, string> | null {
+  try {
+    const api = findGridApi(grid);
+    if (!api) return null;
+    const idx = Number(rowIndex);
+    if (!Number.isFinite(idx)) return null;
+    const node = api.getDisplayedRowAtIndex(idx);
+    const data = node?.data;
+    if (!data || typeof data !== 'object') return null;
+
+    const row: Record<string, string> = {};
+    for (const [col, v] of Object.entries(data as Record<string, unknown>)) {
+      if (IGNORED.includes(col)) continue;
+      const text = stringifyCell(v);
+      if (text) row[col] = text;
+    }
+    return Object.keys(row).length ? row : null;
+  } catch (err) {
+    log.error('ag-grid: readAgGridRowData() (tier 2) failed, falling through to DOM', err);
+    return null;
+  }
+}
+
 export function readAgGridCellContext(target: Element): CellContext | null {
   const cell = target.closest(S.GRID_CELL);
   if (!cell) return null;
@@ -86,6 +150,8 @@ export function readAgGridCellContext(target: Element): CellContext | null {
   let t0Raw = '';
   let host = '';
   let row: Record<string, string> = {};
+  let source: CellContext['source'] = 'dom';
+  let runId: string | undefined;
 
   if (rowIndex) {
     const time = findRowCell(grid, rowIndex, PIVOT.TIME_COLUMNS);
@@ -96,9 +162,42 @@ export function readAgGridCellContext(target: Element): CellContext | null {
     const hostCell = findRowCell(grid, rowIndex, PIVOT.HOST_COLUMNS);
     if (hostCell) host = cellText(hostCell.cell);
     row = readRow(grid, rowIndex);
+
+    // Tier 1 (#14): the last captured QueryRun, matched by trustworthy cells.
+    const match = matchCapturedRow(row, getLastCapture('sentinel'));
+    if (match) {
+      row = match.row;
+      source = 'capture';
+      runId = match.runId;
+    } else {
+      // Tier 2 (#14): AG Grid's own (unvirtualized) row data.
+      const gridRow = readAgGridRowData(grid, rowIndex);
+      if (gridRow) {
+        row = gridRow;
+        source = 'grid';
+      }
+    }
+
+    // Recompute T0/HOST from the fuller row once tier 1/2 supplied one - a
+    // column off-screen in the DOM (virtualized) may now be present. `t0Raw`
+    // (display text) is left as the DOM found it either way: it documents
+    // what was ON SCREEN, which tier 1/2 does not change. Falls back to
+    // whatever tier 3 already computed above if parsing the fuller value
+    // fails - never downgrades a working DOM read to nothing.
+    if (source !== 'dom') {
+      const fullTimeCol = PIVOT.TIME_COLUMNS.find((c) => row[c]);
+      if (fullTimeCol) {
+        const parsed = parseGridTime(row[fullTimeCol], true);
+        if (parsed) t0 = parsed;
+      }
+      const fullHostCol = PIVOT.HOST_COLUMNS.find((c) => row[c]);
+      if (fullHostCol) host = row[fullHostCol];
+    }
+
+    log.debug('ag-grid: row read', { column, source, runId, rowFields: Object.keys(row).length });
   }
 
-  return { value, column, t0, t0Raw, host, row };
+  return { value, column, t0, t0Raw, host, row, source, runId };
 }
 
 export function getOpenAgGridContextMenu(): HTMLElement | null {
