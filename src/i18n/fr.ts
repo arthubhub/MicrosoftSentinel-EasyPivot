@@ -47,6 +47,13 @@ export const fr = {
   'panel.params.hostPlaceholder': 'vide = toutes',
   'panel.params.typeMatches': 'La valeur correspond à ce type',
   'panel.params.typeMismatch': 'La valeur ne correspond pas à ce type, pivot possible quand même',
+  'panel.params.presetsLabel': 'Préréglages',
+  'panel.params.preset1h': '±1 h',
+  'panel.params.preset24h': '±24 h',
+  'panel.params.preset7d': '±7 j',
+  'panel.params.presetTitle': 'Remplit Avant et Après',
+  'panel.params.tiLinksLabel': 'Threat Intel',
+  'panel.params.tiLinkTitle': 'Ouvre {label} dans un nouvel onglet (envoie la valeur à ce service)',
 
   // ── Panel · rules ──
   'panel.rules.injectTitle': "Injecter la requête dans l'éditeur",
@@ -58,6 +65,10 @@ export const fr = {
   'panel.rules.readingNoise': 'Bruit : ',
   'panel.rules.noRules': 'Aucune règle pour ce type',
   'panel.rules.hiddenForPlatform': '{n} règle{s} masquée{s} pour cette plateforme',
+  'panel.rules.searchPlaceholder': 'Rechercher une règle',
+  'panel.rules.searchTitle': 'Filtrer par id, nom ou description (↑/↓ puis Entrée)',
+  'panel.rules.noSearchMatch': 'Aucune règle ne correspond à la recherche',
+  'panel.rules.recentTitle': 'Récentes',
 
   // ── Panel · settings ──
   'settings.ageNow': "à l'instant",
@@ -75,6 +86,17 @@ export const fr = {
   'settings.downloadFailed': 'Échec du téléchargement : {error}',
   'settings.downloading': 'Téléchargement…',
   'settings.catalogWarningsLabel': 'Avertissements du catalogue :',
+
+  // ── Panel · settings · Threat Intel (N7, #20) — tous désactivés par défaut ──
+  'settings.ti.title': 'Threat Intel',
+  'settings.ti.consentWarning':
+    'La valeur sera envoyée à un service externe quand tu cliqueras sur le lien',
+  'settings.ti.customLabelPlaceholder': 'Nom du fournisseur',
+  'settings.ti.customTemplatePlaceholder': 'https://exemple.com/...{value}...',
+  'settings.ti.addCustom': 'Ajouter',
+  'settings.ti.removeCustom': 'Supprimer ce fournisseur',
+  'settings.ti.invalidScheme': 'Modèle refusé : seules les URL https:// sont acceptées',
+  'settings.ti.invalidPlaceholder': 'Modèle refusé : doit contenir le jeton `{value}`',
 
   // ── Toasts ──
   'notify.emptyValue': 'Valeur vide',

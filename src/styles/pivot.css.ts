@@ -257,6 +257,12 @@ export const pivotStyles = `
     color: var(--colorIconError, #a4262c);
   }
 
+  /* ── Time window presets (#19) ── */
+
+  .${P}-presets {
+    margin-top: 2px;
+  }
+
   /* ── Context (investigation journal) ── */
 
   .${P}-fields {
@@ -303,7 +309,25 @@ export const pivotStyles = `
     vertical-align: middle;
   }
 
-  /* ── Rule list (the only scrolling area) ── */
+  /* ── Rules block: fixed search box + the only scrolling area (#17) ── */
+
+  .${P}-rules {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .${P}-search-wrap {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--colorDividerSecondary, #edebe9);
+  }
+
+  .${P}-search {
+    width: 100%;
+  }
 
   .${P}-list {
     flex: 1;
@@ -328,6 +352,13 @@ export const pivotStyles = `
   .${P}-section-title--statistics { border-left-color: #8764b8; }
   .${P}-section-title--pivot { border-left-color: #0078d4; }
   .${P}-section-title--timeline { border-left-color: #ca5010; }
+  .${P}-section-title--recent { border-left-color: #107c10; }
+
+  .${P}-rule-row--highlight {
+    background: var(--colorControlBackgroundSelected, #edebe9);
+    outline: 2px solid var(--colorControlBorderFocus, #0078d4);
+    outline-offset: -2px;
+  }
 
   .${P}-rule {
     border-bottom: 1px solid var(--colorDividerSecondary, #edebe9);
@@ -401,5 +432,83 @@ export const pivotStyles = `
   @media (prefers-reduced-motion: reduce) {
     .${P} { animation: none; }
     .${P}-rule-row { transition: none; }
+  }
+
+  /* ── Threat Intel links (N7, #20) ── */
+
+  .${P}-ti-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .${P}-ti-links:empty {
+    display: none;
+  }
+
+  .${P}-ti-link {
+    height: 24px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--colorControlBorder, #8a8886);
+    border-radius: 2px;
+    background: var(--colorButtonBackgroundSecondary, #fff);
+    color: var(--colorTextPrimary, #292827);
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    box-sizing: border-box;
+  }
+
+  .${P}-ti-link:hover {
+    background: var(--colorButtonBackgroundSecondaryHover, #f3f2f1);
+  }
+
+  /* ── Threat Intel providers (settings) ── */
+
+  .${P}-ti-providers {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .${P}-ti-provider-row,
+  .${P}-ti-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .${P}-ti-custom-row {
+    justify-content: space-between;
+  }
+
+  .${P}-ti-provider-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+
+  .${P}-ti-checkbox {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .${P}-ti-add {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .${P}-ti-add .${P}-input {
+    width: auto;
+    flex: 1;
+    min-width: 72px;
   }
 `;

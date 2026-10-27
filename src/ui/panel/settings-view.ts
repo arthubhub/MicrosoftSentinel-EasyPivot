@@ -1,6 +1,12 @@
+import type { IndicatorId } from '../../types.ts';
 import { CSS_PREFIX, DEFAULT_RULES_URL } from '../../config.ts';
 import { getCatalogStatus } from '../../core/rules-catalog.ts';
+import { getIndicatorIds, getIndicatorLabel } from '../../core/pivot.ts';
+import { BUILTIN_TI_PROVIDERS, isValidTiTemplate, type TiProvider } from '../../core/ti-links.ts';
+import { getSetting, setSetting } from '../../core/settings.ts';
+import { log } from '../../core/log.ts';
 import { t } from '../../i18n/index.ts';
+import { showToast } from '../notification.ts';
 import { P, el, button, field } from './shared.ts';
 
 function relativeAge(ms: number): string {
@@ -22,9 +28,22 @@ export interface SettingsView {
   readonly catalogError: HTMLDivElement;
   readonly catalogWarnings: HTMLDivElement;
   renderStatus(): void;
+  /** Rebuilds the provider checkboxes and custom-provider list from current settings. */
+  renderTi(): void;
 }
 
-export function createSettingsView(): SettingsView {
+/** Generated client-side only, never sent anywhere: just a stable key for `ti.providers`. */
+function newCustomId(): string {
+  return `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * `onTiChange` lets the caller refresh anything else that depends on
+ * `ti.providers`/`ti.custom` (the links shown under the Value field in
+ * `params-view.ts`) right when a checkbox is toggled here, instead of
+ * waiting for the panel to be reopened.
+ */
+export function createSettingsView(onTiChange?: () => void): SettingsView {
   // Settings
   const settings = el('div', `${P}-settings`);
   settings.hidden = true;
@@ -37,7 +56,119 @@ export function createSettingsView(): SettingsView {
   const catalogStatus = el('div', `${P}-status`);
   const catalogError = el('div', `${P}-status ${P}-status--error`);
   const catalogWarnings = el('div', `${P}-status`);
-  settings.append(urlField.wrap, settingsActions, catalogStatus, catalogError, catalogWarnings);
+
+  // ── Threat Intel providers (N7, #20) — all disabled by default ──
+  const tiTitle = el('span', `${P}-field-label`, t('settings.ti.title'));
+  const tiProvidersList = el('div', `${P}-ti-providers`);
+  const customLabelInput = el('input', `${P}-input`);
+  customLabelInput.type = 'text';
+  customLabelInput.placeholder = t('settings.ti.customLabelPlaceholder');
+  const customTypeSelect = el('select', `${P}-input`);
+  for (const id of getIndicatorIds()) {
+    const opt = el('option', undefined, getIndicatorLabel(id));
+    opt.value = id;
+    customTypeSelect.appendChild(opt);
+  }
+  const customTemplateInput = el('input', `${P}-input`);
+  customTemplateInput.type = 'text';
+  customTemplateInput.placeholder = t('settings.ti.customTemplatePlaceholder');
+  const addCustomBtn = button(`${P}-btn`, t('settings.ti.addCustom'));
+  const tiAddRow = el('div', `${P}-ti-add`);
+  tiAddRow.append(customLabelInput, customTypeSelect, customTemplateInput, addCustomBtn);
+
+  settings.append(
+    urlField.wrap,
+    settingsActions,
+    catalogStatus,
+    catalogError,
+    catalogWarnings,
+    tiTitle,
+    tiProvidersList,
+    tiAddRow,
+  );
+
+  /** `true` <-> `false` is the only direction that triggers the consent toast (N7). */
+  function setProviderEnabled(id: string, enable: boolean): void {
+    const ti = getSetting('ti');
+    const already = ti.providers.includes(id);
+    if (enable === already) return;
+    const providers = enable ? [...ti.providers, id] : ti.providers.filter((p) => p !== id);
+    setSetting('ti', { ...ti, providers });
+    log.debug('ti: provider toggled', { id, enable });
+    if (enable) showToast(t('settings.ti.consentWarning'), 'info');
+    renderTi();
+    onTiChange?.();
+  }
+
+  function removeCustomProvider(id: string): void {
+    const ti = getSetting('ti');
+    setSetting('ti', {
+      providers: ti.providers.filter((p) => p !== id),
+      custom: ti.custom.filter((p) => p.id !== id),
+    });
+    renderTi();
+    onTiChange?.();
+  }
+
+  function addCustomProvider(): void {
+    const label = customLabelInput.value.trim();
+    const type = customTypeSelect.value as IndicatorId;
+    const template = customTemplateInput.value.trim();
+
+    if (!label || !template) return;
+    if (!template.startsWith('https://')) {
+      showToast(t('settings.ti.invalidScheme'), 'error');
+      return;
+    }
+    if (!template.includes('{value}')) {
+      showToast(t('settings.ti.invalidPlaceholder'), 'error');
+      return;
+    }
+    // Belt-and-braces: isValidTiTemplate() is the single source of truth core/ti-links.ts
+    // relies on too, so a provider that passes here is one buildTiLinks() will also accept.
+    if (!isValidTiTemplate(template)) {
+      showToast(t('settings.ti.invalidScheme'), 'error');
+      return;
+    }
+
+    const provider: TiProvider = { id: newCustomId(), label, templates: { [type]: template } };
+    const ti = getSetting('ti');
+    setSetting('ti', { ...ti, custom: [...ti.custom, provider] });
+    customLabelInput.value = '';
+    customTemplateInput.value = '';
+    renderTi();
+  }
+
+  addCustomBtn.addEventListener('click', addCustomProvider);
+
+  function renderProviderRow(provider: TiProvider, removable: boolean): HTMLDivElement {
+    const row = el('div', removable ? `${P}-ti-custom-row` : `${P}-ti-provider-row`);
+    const ti = getSetting('ti');
+    const checkbox = el('input', `${P}-ti-checkbox`);
+    checkbox.type = 'checkbox';
+    checkbox.checked = ti.providers.includes(provider.id);
+    checkbox.addEventListener('change', () => setProviderEnabled(provider.id, checkbox.checked));
+    const labelWrap = el('label', `${P}-ti-provider-label`);
+    labelWrap.append(checkbox, document.createTextNode(provider.label));
+    row.appendChild(labelWrap);
+    if (removable) {
+      const removeBtn = button(`${P}-btn`, '✕', t('settings.ti.removeCustom'));
+      removeBtn.addEventListener('click', () => removeCustomProvider(provider.id));
+      row.appendChild(removeBtn);
+    }
+    return row;
+  }
+
+  function renderTi(): void {
+    const ti = getSetting('ti');
+    tiProvidersList.replaceChildren();
+    for (const provider of BUILTIN_TI_PROVIDERS) {
+      tiProvidersList.appendChild(renderProviderRow(provider, false));
+    }
+    for (const provider of ti.custom) {
+      tiProvidersList.appendChild(renderProviderRow(provider, true));
+    }
+  }
 
   function renderStatus(): void {
     const st = getCatalogStatus();
@@ -74,5 +205,6 @@ export function createSettingsView(): SettingsView {
     catalogError,
     catalogWarnings,
     renderStatus,
+    renderTi,
   };
 }

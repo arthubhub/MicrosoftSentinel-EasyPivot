@@ -1,7 +1,8 @@
 import type { CellContext, PlatformAdapter } from '../types.ts';
 import { log } from '../core/log.ts';
 import { CSS_PREFIX, PIVOT } from '../config.ts';
-import { detectIndicators, getIndicatorLabel } from '../core/pivot.ts';
+import { detectForCell } from '../core/detection.ts';
+import { getIndicatorLabel } from '../core/pivot.ts';
 import { recordCellMenuOutcome } from '../core/health.ts';
 import { t } from '../i18n/index.ts';
 import { createPivotMenu, type PivotMenuComponent } from './pivot-menu.ts';
@@ -94,13 +95,24 @@ export function createPivotTrigger(platform: PlatformAdapter): PivotTriggerCompo
 
   /** Replace (never keep) a previous entry: the context is always the last click's. */
   function addPivotItem(list: HTMLElement, ctx: CellContext, x: number, y: number): void {
-    log.debug('cell read', { column: ctx.column, value: ctx.value, t0: ctx.t0, host: ctx.host,
-      rowFields: Object.keys(ctx.row).length, types: detectIndicators(ctx.value, ctx.column) });
+    // One detection per right-click (#18): logged here, not inside the pure
+    // detectForCell(), which also runs silently inside render loops below.
+    const detection = detectForCell(ctx.value, ctx.column, ctx.entityName);
+    log.debug('cell detection', {
+      column: ctx.column,
+      value: ctx.value,
+      entityName: ctx.entityName,
+      t0: ctx.t0,
+      host: ctx.host,
+      rowFields: Object.keys(ctx.row).length,
+      tier: detection.tier,
+      candidates: detection.candidates,
+    });
     list
       .querySelectorAll(`.${OPTION_CLASS}, .${PIVOT.MENU_SEPARATOR_CLASS}`)
       .forEach((n) => n.remove());
 
-    const type = detectIndicators(ctx.value, ctx.column)[0];
+    const type = detection.candidates[0];
     const label = type ? t('menu.pivotWithType', { label: getIndicatorLabel(type) }) : t('common.pivot');
 
     // Diagnostic record only (N6 cell-menu probe): behavior is unchanged,

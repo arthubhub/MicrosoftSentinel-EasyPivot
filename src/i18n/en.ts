@@ -48,6 +48,13 @@ export const en: Record<MessageKey, string> = {
   'panel.params.hostPlaceholder': 'empty = all',
   'panel.params.typeMatches': 'The value matches this type',
   'panel.params.typeMismatch': 'The value does not match this type, pivoting is still possible',
+  'panel.params.presetsLabel': 'Presets',
+  'panel.params.preset1h': '±1 h',
+  'panel.params.preset24h': '±24 h',
+  'panel.params.preset7d': '±7 d',
+  'panel.params.presetTitle': 'Fills Before and After',
+  'panel.params.tiLinksLabel': 'Threat Intel',
+  'panel.params.tiLinkTitle': 'Opens {label} in a new tab (sends the value to that service)',
 
   // ── Panel · rules ──
   'panel.rules.injectTitle': 'Inject the query into the editor',
@@ -59,6 +66,10 @@ export const en: Record<MessageKey, string> = {
   'panel.rules.readingNoise': 'Noise: ',
   'panel.rules.noRules': 'No rule for this type',
   'panel.rules.hiddenForPlatform': '{n} rule{s} hidden for this platform',
+  'panel.rules.searchPlaceholder': 'Search a rule',
+  'panel.rules.searchTitle': 'Filter by id, name or description (↑/↓ then Enter)',
+  'panel.rules.noSearchMatch': 'No rule matches the search',
+  'panel.rules.recentTitle': 'Recent',
 
   // ── Panel · settings ──
   'settings.ageNow': 'just now',
@@ -76,6 +87,17 @@ export const en: Record<MessageKey, string> = {
   'settings.downloadFailed': 'Download failed: {error}',
   'settings.downloading': 'Downloading…',
   'settings.catalogWarningsLabel': 'Catalog warnings:',
+
+  // ── Panel · settings · Threat Intel (N7, #20) — all disabled by default ──
+  'settings.ti.title': 'Threat Intel',
+  'settings.ti.consentWarning':
+    'The value will be sent to an external service when you click the link',
+  'settings.ti.customLabelPlaceholder': 'Provider name',
+  'settings.ti.customTemplatePlaceholder': 'https://example.com/...{value}...',
+  'settings.ti.addCustom': 'Add',
+  'settings.ti.removeCustom': 'Remove this provider',
+  'settings.ti.invalidScheme': 'Template rejected: only https:// URLs are accepted',
+  'settings.ti.invalidPlaceholder': 'Template rejected: must contain the `{value}` token',
 
   // ── Toasts ──
   'notify.emptyValue': 'Empty value',

@@ -124,6 +124,12 @@ export interface PivotCatalog {
   readonly rules: readonly PivotRule[];
   /** `Table.Column` pairs per indicator type, published by the rules repo (phase 2b) */
   readonly locations?: Readonly<Partial<Record<IndicatorId, readonly string[]>>>;
+  /**
+   * Number of entries at the HEAD of each `locations[type]` array that come
+   * from the confirmed tier (rule comparison / Defender Entity) rather than
+   * the uncertain tier (column-name pattern). Read by `core/detection.ts`.
+   */
+  readonly locationsConfirmed?: Readonly<Partial<Record<IndicatorId, number>>>;
   /** Typed in phase 6 (N4); opaque for now */
   readonly scenarios?: readonly unknown[];
 }
@@ -139,6 +145,11 @@ export interface CellContext {
   readonly host: string;
   /** Other cells of the same row present in the DOM (column → value) */
   readonly row: Readonly<Record<string, string>>;
+  /**
+   * Defender's own declared entity type for this cell (`context-data-schema`,
+   * #18). Sentinel has no equivalent and always leaves this undefined.
+   */
+  readonly entityName?: string;
 }
 
 export interface PivotParams {

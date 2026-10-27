@@ -1,4 +1,5 @@
 import type { PlatformId, PlatformVariant } from '../types.ts';
+import type { TiProvider } from './ti-links.ts';
 import { STORAGE_KEYS } from '../config.ts';
 import { getJson, setJson } from './storage.ts';
 
@@ -33,6 +34,15 @@ export interface Settings {
    * `retention.*` (days, closedDays) is phase 4/5, see docs/PLAN-DEV.md Annexes.
    */
   readonly retention: { readonly maxBytes: number };
+  /**
+   * Threat Intel links (N7, #20). `providers` is the list of enabled
+   * provider ids (built-in or custom) — empty by default, so a fresh
+   * install shows no link anywhere until the analyst opts in. `custom` is
+   * the user's own providers, same shape as the built-ins (see
+   * `core/ti-links.ts`), validated (`https://` + `{value}`) by the settings
+   * UI before being stored here.
+   */
+  readonly ti: { readonly providers: readonly string[]; readonly custom: readonly TiProvider[] };
 }
 
 const DEFAULTS: Settings = {
@@ -40,6 +50,7 @@ const DEFAULTS: Settings = {
   platformVariant: 'auto',
   logLevel: 'debug',
   retention: { maxBytes: 20_000_000 },
+  ti: { providers: [], custom: [] },
 };
 
 export function getSettings(): Settings {

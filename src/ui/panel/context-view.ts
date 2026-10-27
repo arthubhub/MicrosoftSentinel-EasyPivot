@@ -1,5 +1,6 @@
 import type { CellContext, IndicatorId, PivotSnapshot } from '../../types.ts';
-import { detectIndicators, getIndicatorLabel } from '../../core/pivot.ts';
+import { detectForCell } from '../../core/detection.ts';
+import { getIndicatorLabel } from '../../core/pivot.ts';
 import { CSS_PREFIX } from '../../config.ts';
 import { t } from '../../i18n/index.ts';
 import { P, el, button } from './shared.ts';
@@ -132,7 +133,9 @@ export function createContextView(): ContextView {
     let count = 0;
     for (const [col, val] of Object.entries(row)) {
       if (count >= MAX_FIELD_CHIPS) break;
-      const detected = detectIndicators(val, col);
+      // No entityName here: only the originally right-clicked cell carries
+      // one, not every field of the row (render loop — not logged, #18).
+      const detected = detectForCell(val, col).candidates;
       if (detected.length === 0) continue;
       count++;
       let cls = `${CSS_PREFIX}-category-chip ${P}-field-chip`;
