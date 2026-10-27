@@ -2,6 +2,14 @@
 
 export type PlatformId = 'sentinel' | 'defender';
 
+/**
+ * Tenant topology for rule filtering (#7), distinct from `PlatformId` (which
+ * UI the user is on). `defender-unified` = Defender resolving both XDR and
+ * Sentinel workspaces; not confirmed on a live tenant yet (see PLAN-DEV.md
+ * Annexes, "Point ouvert"). Full detection/memory per tenant is phase 4/5.
+ */
+export type PlatformVariant = 'sentinel' | 'defender' | 'defender-unified';
+
 export interface PlatformAdapter {
   readonly id: PlatformId;
   readonly label: string;
@@ -23,6 +31,49 @@ export interface PlatformAdapter {
   addContextMenuItem(list: HTMLElement, label: string, onSelect: () => void): void;
   /** Close the grid menu (after the Pivot entry was chosen) */
   closeContextMenu(list: HTMLElement): void;
+  /** Health diagnostic probes (N6); DOM access stays here, see core/health.ts */
+  readonly healthProbes: PlatformHealthProbes;
+}
+
+// ── Health diagnostics (N6, #12) ──
+
+/**
+ * Diagnostic probe outcome. `pending` = the capability is not implemented
+ * yet (capture + tenant key, phase 4 item 4g) and is never reported as a
+ * fabricated `ok` — a diagnostic that lies is worse than one that is missing.
+ */
+export type ProbeState = 'ok' | 'warn' | 'fail' | 'pending';
+
+export type HealthProbeId =
+  | 'queryPage'
+  | 'editor'
+  | 'resultsGrid'
+  | 'cellMenu'
+  | 'runButton'
+  | 'buttonAnchor'
+  | 'catalog'
+  | 'storage'
+  | 'capture' // phase 4 (4g): needs the capture layer, not implemented here
+  | 'tenantKey'; // phase 4 (4g): needs core/tenant.ts, not implemented here
+
+/** State + short, already-localized, data-free message (project rule 1) */
+export interface ProbeOutcome {
+  readonly state: ProbeState;
+  readonly message: string;
+}
+
+export interface ProbeResult extends ProbeOutcome {
+  readonly id: HealthProbeId;
+}
+
+/** DOM-touching probes; one implementation per adapter (selectors stay there) */
+export interface PlatformHealthProbes {
+  queryPage(): ProbeOutcome;
+  editor(): ProbeOutcome;
+  resultsGrid(): ProbeOutcome;
+  cellMenu(): ProbeOutcome;
+  runButton(): ProbeOutcome;
+  buttonAnchor(): ProbeOutcome;
 }
 
 // ── Pivot Catalog ──
@@ -66,9 +117,15 @@ export interface PivotRule {
 
 export interface PivotCatalog {
   readonly version: string;
+  /** Catalog format version (absent = legacy 1, see core/catalog-validate.ts) */
+  readonly formatVersion?: number | string;
   readonly indicators: Record<IndicatorId, { readonly label: string; readonly patterns: readonly string[] }>;
   readonly actions: Record<PivotActionId, { readonly label: string }>;
   readonly rules: readonly PivotRule[];
+  /** `Table.Column` pairs per indicator type, published by the rules repo (phase 2b) */
+  readonly locations?: Readonly<Partial<Record<IndicatorId, readonly string[]>>>;
+  /** Typed in phase 6 (N4); opaque for now */
+  readonly scenarios?: readonly unknown[];
 }
 
 /** What the user right-clicked in the results grid */
@@ -164,6 +221,13 @@ export interface CachedData<T> {
 // ── GM API Declarations ──
 
 declare global {
+  /**
+   * Script version, injected by vite.config.ts from package.json — the same
+   * source as the `{{VERSION}}` userscript-header substitution (#8). See
+   * core/health.ts's `getScriptVersion()`.
+   */
+  const __SCRIPT_VERSION__: string;
+
   /** Tampermonkey's unsandboxed reference to the page's real window object */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const unsafeWindow: any;

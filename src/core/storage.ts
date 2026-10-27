@@ -32,3 +32,20 @@ export function setCache<T>(key: string, data: T): void {
 export function deleteKey(key: string): void {
   GM_deleteValue(key);
 }
+
+// ── Size estimate (health diagnostic, N6 storage probe) ──
+
+/**
+ * Rough byte size of the given keys' raw stored strings. Tampermonkey's
+ * `GM_listValues` is not in our declared GM API (types.ts), so this only
+ * covers keys known up front; phase 4/5 must extend the caller's key list
+ * when `shq_runs_<tenantKey>` / `shq_case_<id>` exist.
+ */
+export function estimateStorageBytes(keys: readonly string[]): number {
+  let total = 0;
+  for (const key of keys) {
+    const raw = GM_getValue<string>(key, '');
+    if (raw) total += new TextEncoder().encode(raw).length;
+  }
+  return total;
+}

@@ -9,6 +9,8 @@ export const STORAGE_KEYS = {
   RULES_CACHE: 'shq_pivot_rules_cache',
   /** Investigation snapshots (pivot contexts) */
   SNAPSHOTS: 'shq_pivot_snapshots',
+  /** User settings (single JSON blob, see core/settings.ts) */
+  SETTINGS: 'shq_settings',
 } as const;
 
 // ── Pivot rules catalog ──
@@ -55,6 +57,8 @@ export const SELECTORS = {
   SENTINEL: {
     /** The discover wrapper */
     DISCOVER_WRAPPER: '#DiscoverWrapper',
+    /** Run query button (step-0 survey, health diagnostic N6) */
+    RUN_BUTTON: '#logs-main-run-button',
     /** The left-side KQL mode panel (contains Run, time picker, etc.) */
     KQL_PANEL: '[data-logs-query-controls-bar]',
     /** AG Grid root of the results view */

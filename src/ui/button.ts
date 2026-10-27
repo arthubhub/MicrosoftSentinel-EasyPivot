@@ -1,13 +1,18 @@
 import { CSS_PREFIX, SELECTORS } from '../config.ts';
 import type { PlatformId } from '../types.ts';
+import { t } from '../i18n/index.ts';
 
+// Brand name: never translated
 const BUTTON_LABEL = 'EasyPivot';
-const BUTTON_TITLE = 'EasyPivot : historique des événements, pivot manuel et paramètres';
+// Resolved lazily (not at module load, before initI18n() has run)
+const buttonTitle = (): string => t('button.title');
 
 export interface ButtonComponent {
   readonly element: HTMLDivElement;
   readonly buttonEl: HTMLButtonElement;
   setOpen(open: boolean): void;
+  /** Red dot when the last health diagnostic (N6) found a `fail` probe */
+  setHealthBadge(hasFailure: boolean): void;
 }
 
 /**
@@ -96,7 +101,7 @@ function createDefenderButton(onClick: () => void): ButtonComponent {
   btn.className = cls.root;
   btn.setAttribute('role', 'menuitem');
   btn.setAttribute('data-is-focusable', 'true');
-  btn.title = BUTTON_TITLE;
+  btn.title = buttonTitle();
   btn.tabIndex = 0;
 
   const flexContainer = document.createElement('span');
@@ -122,7 +127,10 @@ function createDefenderButton(onClick: () => void): ButtonComponent {
     buttonEl: btn,
     setOpen(open: boolean) {
       btn.classList.toggle('is-checked', open);
-      btn.title = open ? 'Fermer' : BUTTON_TITLE;
+      btn.title = open ? t('common.close') : buttonTitle();
+    },
+    setHealthBadge(hasFailure: boolean) {
+      wrapper.classList.toggle(`${CSS_PREFIX}-health-badge`, hasFailure);
     },
   };
 }
@@ -136,7 +144,7 @@ function createSentinelButton(onClick: () => void): ButtonComponent {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = `${CSS_PREFIX}-btn`;
-  btn.title = BUTTON_TITLE;
+  btn.title = buttonTitle();
 
   const labelSpan = document.createElement('span');
   labelSpan.className = `${CSS_PREFIX}-btn-label`;
@@ -152,7 +160,10 @@ function createSentinelButton(onClick: () => void): ButtonComponent {
     buttonEl: btn,
     setOpen(open: boolean) {
       btn.classList.toggle(`${CSS_PREFIX}-btn--open`, open);
-      btn.title = open ? 'Fermer' : BUTTON_TITLE;
+      btn.title = open ? t('common.close') : buttonTitle();
+    },
+    setHealthBadge(hasFailure: boolean) {
+      wrapper.classList.toggle(`${CSS_PREFIX}-health-badge`, hasFailure);
     },
   };
 }

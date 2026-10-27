@@ -72,19 +72,22 @@ export const pivotStyles = `
     gap: 2px;
   }
 
-  .${P}-settings-btn {
+  .${P}-settings-btn,
+  .${P}-health-btn {
     width: 24px !important;
     height: 24px !important;
     font-size: 14px !important;
   }
 
-  .${P}-settings-btn--open {
+  .${P}-settings-btn--open,
+  .${P}-health-btn--open {
     color: var(--colorTextBrand, #0078d4) !important;
   }
 
-  /* ── Blocks above the list (settings, context, params) ── */
+  /* ── Blocks above the list (settings, health, context, params) ── */
 
   .${P}-settings,
+  .${P}-health,
   .${P}-context,
   .${P}-params {
     display: flex;
@@ -95,8 +98,52 @@ export const pivotStyles = `
     flex-shrink: 0;
   }
 
-  .${P}-settings {
+  .${P}-settings,
+  .${P}-health {
     background: var(--colorContainerBackgroundSecondary, #f3f2f1);
+  }
+
+  /* ── Health diagnostic list (N6) ── */
+
+  .${P}-health-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .${P}-health-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .${P}-health-dot {
+    flex-shrink: 0;
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-top: 3px;
+    border-radius: 50%;
+  }
+
+  .${P}-health-dot--ok { background: #107c10; }
+  .${P}-health-dot--warn { background: #ca5010; }
+  .${P}-health-dot--fail { background: var(--colorIconError, #a4262c); }
+  .${P}-health-dot--pending { background: var(--colorTextDisabled, #a19f9d); }
+
+  .${P}-health-label {
+    flex-shrink: 0;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .${P}-health-message {
+    color: var(--colorTextSecondary, #646464);
+    word-break: break-word;
   }
 
   .${P}-row {
