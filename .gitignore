@@ -3,3 +3,4 @@ dist/
 *.png
 !docs/*.png
 .DS_Store
+rules/pivot-rules.json
