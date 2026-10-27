@@ -35,3 +35,20 @@ export function field(
   wrap.appendChild(input);
   return { wrap, input };
 }
+
+/** Local-only download, no network: Blob + an `<a download>` click (hard constraint: never any other route). */
+export function downloadText(filename: string, text: string, mimeType: string): void {
+  const blob = new Blob([text], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = el('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function downloadJson(filename: string, data: unknown): void {
+  downloadText(filename, JSON.stringify(data, null, 2), 'application/json');
+}

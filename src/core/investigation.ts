@@ -54,7 +54,8 @@ export function getSnapshot(id: string): PivotSnapshot | undefined {
   return listSnapshots().find((s) => s.id === id);
 }
 
-function sameEvent(a: PivotSnapshot, ctx: CellContext, sourceQuery: string): boolean {
+/** Exported for `core/cases.ts`'s case-level dedup (5e-1): one definition of "same event". */
+export function sameEvent(a: PivotSnapshot, ctx: CellContext, sourceQuery: string): boolean {
   // Without a grid row (manual input), the value is what identifies the event
   const noRow = Object.keys(ctx.row).length === 0;
   return (
@@ -64,6 +65,38 @@ function sameEvent(a: PivotSnapshot, ctx: CellContext, sourceQuery: string): boo
     a.host === ctx.host &&
     JSON.stringify(a.row) === JSON.stringify(ctx.row)
   );
+}
+
+/**
+ * A fresh snapshot from a right-click context. `source` is the editor text
+ * already bounded by the caller (`''` when too large). Shared by the legacy
+ * journal above and `core/cases.ts`'s `recordSnapshotInCase` (5e-1).
+ */
+export function buildSnapshot(ctx: CellContext, source: string, platform: PlatformId): PivotSnapshot {
+  const row: Record<string, string> = {};
+  for (const [col, val] of Object.entries(ctx.row)) {
+    row[col] = truncate(val, SNAPSHOTS.MAX_CELL_CHARS);
+  }
+
+  return {
+    id: newId(),
+    createdAt: Date.now(),
+    platform,
+    value: truncate(ctx.value, SNAPSHOTS.MAX_CELL_CHARS),
+    column: ctx.column,
+    t0: ctx.t0,
+    t0Raw: ctx.t0Raw,
+    host: ctx.host,
+    row,
+    // 4e: keep the row's provenance in the snapshot too (same reasoning as
+    // the existing fields above - the snapshot is "the context of a pivot",
+    // and how the row was obtained is part of that context).
+    source: ctx.source,
+    runId: ctx.runId,
+    sourceQuery: source,
+    originRuleId: findOriginRuleId(source),
+    steps: [],
+  };
 }
 
 /**
@@ -84,30 +117,7 @@ export function recordSnapshot(
     return existing;
   }
 
-  const row: Record<string, string> = {};
-  for (const [col, val] of Object.entries(ctx.row)) {
-    row[col] = truncate(val, SNAPSHOTS.MAX_CELL_CHARS);
-  }
-
-  const snapshot: PivotSnapshot = {
-    id: newId(),
-    createdAt: Date.now(),
-    platform,
-    value: truncate(ctx.value, SNAPSHOTS.MAX_CELL_CHARS),
-    column: ctx.column,
-    t0: ctx.t0,
-    t0Raw: ctx.t0Raw,
-    host: ctx.host,
-    row,
-    // 4e: keep the row's provenance in the snapshot too (same reasoning as
-    // the existing fields above - the snapshot is "the context of a pivot",
-    // and how the row was obtained is part of that context).
-    source: ctx.source,
-    runId: ctx.runId,
-    sourceQuery: source,
-    originRuleId: findOriginRuleId(source),
-    steps: [],
-  };
+  const snapshot = buildSnapshot(ctx, source, platform);
   save([snapshot, ...list]);
   return snapshot;
 }

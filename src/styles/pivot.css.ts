@@ -84,8 +84,9 @@ export const pivotStyles = `
     color: var(--colorTextBrand, #0078d4) !important;
   }
 
-  /* ── Blocks above the list (settings, health, context, params) ── */
+  /* ── Blocks above the list (case bar, settings, health, context, params) ── */
 
+  .${P}-case-bar,
   .${P}-settings,
   .${P}-health,
   .${P}-context,
@@ -101,6 +102,27 @@ export const pivotStyles = `
   .${P}-settings,
   .${P}-health {
     background: var(--colorContainerBackgroundSecondary, #f3f2f1);
+  }
+
+  /* ── Active-case banner (N2) ── */
+
+  .${P}-case-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .${P}-case-bar-name {
+    font-weight: 600;
+  }
+
+  .${P}-case-view-btn {
+    margin-left: auto;
+  }
+
+  .${P}-badge--closed {
+    color: var(--colorTextSecondary, #646464);
+    border-color: var(--colorTextSecondary, #646464);
   }
 
   /* ── Health diagnostic list (N6) ── */
@@ -278,6 +300,15 @@ export const pivotStyles = `
     max-width: 100% !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
+  }
+
+  .${P}-pin-row {
+    align-items: center;
+  }
+
+  .${P}-pin-info {
+    min-width: 0;
+    word-break: normal;
   }
 
   .${P}-steps {
@@ -484,6 +515,22 @@ export const pivotStyles = `
 
   .${P}-ti-custom-row {
     justify-content: space-between;
+  }
+
+  /* ── Cases management (settings) ── */
+
+  .${P}-cases-row {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 0;
+    border-top: 1px solid var(--colorDividerPrimary, #f3f2f1);
+    font-size: 11px;
+  }
+
+  .${P}-cases-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
   }
 
   .${P}-ti-provider-label {

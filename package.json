@@ -8,7 +8,10 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit && vite build"
+    "check": "tsc --noEmit && vite build",
+    "harness": "esbuild harness/harness.ts --bundle --format=esm --loader:.json=json --define:__SCRIPT_VERSION__='\"harness\"' --outfile=harness/harness.js",
+    "harness:drive": "npm run harness && node harness/drive.mjs",
+    "harness:check": "tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --strict --allowImportingTsExtensions --skipLibCheck harness/harness.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

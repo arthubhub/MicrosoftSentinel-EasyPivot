@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EasyPivot — rendering harness</title>
+<style>
+  body { font: 13px/1.5 "Segoe UI", system-ui, sans-serif; margin: 0; background: #1b1a19; color: #f3f2f1; }
+  header { padding: 10px 14px; background: #252423; border-bottom: 1px solid #3b3a39; }
+  header h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
+  header p { margin: 0 0 8px; color: #a19f9d; max-width: 70ch; }
+  button.harness { background: #0078d4; color: #fff; border: 0; padding: 5px 11px; border-radius: 2px;
+    cursor: pointer; margin-right: 6px; font: inherit; }
+  button.harness.secondary { background: #3b3a39; }
+  main { display: grid; grid-template-columns: 1fr 320px; gap: 12px; padding: 12px; align-items: start; }
+  #grid-host { background: #252423; border: 1px solid #3b3a39; overflow: auto; }
+  #grid-host [role="row"] { display: flex; border-bottom: 1px solid #323130; }
+  #grid-host [role="columnheader"] { font-weight: 600; color: #a19f9d; }
+  #grid-host [role="columnheader"], #grid-host [role="gridcell"] {
+    padding: 5px 8px; min-width: 150px; max-width: 220px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid #323130; }
+  #grid-host [role="gridcell"]:hover { background: #323130; }
+  .scc-commandBar, [data-logs-query-controls-bar] { padding: 8px; border-bottom: 1px solid #3b3a39;
+    display: flex; gap: 8px; align-items: center; }
+  #fake-editor { width: 100%; height: 150px; background: #1e1e1e; color: #d4d4d4; border: 1px solid #3b3a39;
+    font-family: Consolas, monospace; font-size: 12px; padding: 8px; box-sizing: border-box; }
+  aside { background: #252423; border: 1px solid #3b3a39; padding: 10px; }
+  aside h2 { font-size: 12px; margin: 0 0 6px; color: #a19f9d; text-transform: uppercase; }
+  #harness-log { font-family: Consolas, monospace; font-size: 11px; max-height: 320px; overflow: auto;
+    color: #a19f9d; }
+  #harness-log div { padding: 1px 0; border-bottom: 1px solid #323130; }
+  ol { margin: 0; padding-left: 18px; color: #a19f9d; }
+  code { background: #323130; padding: 1px 4px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>EasyPivot — rendering harness</h1>
+  <p>
+    A <strong>fake</strong> portal page. The grid below is hand-written from the selectors in
+    <code>src/config.ts</code> — it is <strong>not</strong> the real Sentinel AG Grid or Defender Fluent DOM.
+    A clean run here means "nothing is grossly broken": the panel opens, sections render, labels resolve.
+    It does <strong>not</strong> prove the real portal selectors still match, that Monaco behaves, or that
+    capture sees a request. Those still need a real session.
+  </p>
+  <button class="harness" id="btn-sentinel">Mount as Sentinel</button>
+  <button class="harness" id="btn-defender">Mount as Defender</button>
+  <button class="harness secondary" id="btn-seed">Seed client + old snapshots</button>
+  <button class="harness secondary" id="btn-seed-case">Seed case (3-level tree)</button>
+  <button class="harness secondary" id="btn-seed-closed">Seed closed case</button>
+  <button class="harness secondary" id="btn-seed-hostile">Seed hostile case</button>
+  <button class="harness secondary" id="btn-seed-report">Seed report case</button>
+  <button class="harness secondary" id="btn-reset">Clear storage</button>
+</header>
+<main>
+  <div>
+    <div id="grid-host"></div>
+    <textarea id="fake-editor" spellcheck="false" placeholder="fake Monaco — injected queries land here"></textarea>
+  </div>
+  <aside>
+    <h2>What to check</h2>
+    <ol>
+      <li>Right-click a cell → a <em>Pivot</em> entry appears, the panel opens.</li>
+      <li>Context, Params, Rules, Diagnostics and Settings all render — no blank block, no <code>undefined</code>.</li>
+      <li>The case bar shows a state (unknown tenant, or a case).</li>
+      <li>Right-click <code>4624</code> in <strong>EventID</strong> → <em>Machine</em> must NOT be preselected.</li>
+      <li>Right-click <code>DC01</code> in <strong>DeviceName</strong> → <em>Machine</em> must be.</li>
+      <li>Right-click <code>svc-sql</code> in <strong>AccountUpn</strong> → <em>Account</em>, not Machine.</li>
+      <li>Pick a rule → KQL lands in the fake editor below.</li>
+      <li>Search the rule list, use ↑/↓ and Enter, try the ±1h/±24h/±7d presets.</li>
+      <li>Settings → Clients, Threat Intel, Capture storage, Migration all render.</li>
+      <li>Switch the browser to French/English and reload — labels follow.</li>
+      <li>Watch the log at right for uncaught errors.</li>
+    </ol>
+    <h2>Log</h2>
+    <div id="harness-log"></div>
+  </aside>
+</main>
+<script type="module" src="./harness.js"></script>
+</body>
+</html>

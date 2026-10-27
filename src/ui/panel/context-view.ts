@@ -37,6 +37,8 @@ export interface ContextView {
   readonly root: HTMLDivElement;
   readonly historySelect: HTMLSelectElement;
   readonly restoreBtn: HTMLButtonElement;
+  /** « Épingler la ligne comme preuve » (N3, 5e-2); the host wires the click */
+  readonly pinBtn: HTMLButtonElement;
   renderContext(
     snapshots: readonly PivotSnapshot[],
     snap: PivotSnapshot | undefined,
@@ -44,6 +46,7 @@ export interface ContextView {
     row: Readonly<Record<string, string>>,
     value: string,
     onFieldChipClick: (value: string, indicator: IndicatorId) => void,
+    caseClosed: boolean,
   ): void;
   renderFields(
     row: Readonly<Record<string, string>>,
@@ -65,7 +68,11 @@ export function createContextView(): ContextView {
   const fieldsLabel = el('span', `${P}-field-label`, t('panel.context.fieldsLabel'));
   const fields = el('div', `${P}-fields`);
   const steps = el('div', `${P}-steps`);
-  context.append(contextRow, fieldsLabel, fields, steps);
+  const pinRow = el('div', `${P}-row ${P}-pin-row`);
+  const pinBtn = button(`${P}-btn ${P}-pin`, t('panel.context.pinRow'), t('panel.context.pinRowHint'));
+  const pinInfo = el('span', `${P}-status ${P}-pin-info`);
+  pinRow.append(pinBtn, pinInfo);
+  context.append(contextRow, fieldsLabel, fields, steps, pinRow);
 
   function renderContext(
     snapshots: readonly PivotSnapshot[],
@@ -74,6 +81,7 @@ export function createContextView(): ContextView {
     row: Readonly<Record<string, string>>,
     value: string,
     onFieldChipClick: (value: string, indicator: IndicatorId) => void,
+    caseClosed: boolean,
   ): void {
     historySelect.replaceChildren();
     if (pendingCtx && !snap) {
@@ -120,7 +128,22 @@ export function createContextView(): ContextView {
       );
     }
 
+    renderPin(snap, caseClosed);
+
     context.hidden = snapshots.length === 0 && !pendingCtx;
+  }
+
+  /** Disabled WITH a visible reason (not just a tooltip) in the three cases the plan names. */
+  function renderPin(snap: PivotSnapshot | undefined, caseClosed: boolean): void {
+    let reason = '';
+    if (!snap) reason = t('panel.context.pinNoSnapshot');
+    else if (caseClosed) reason = t('panel.context.pinClosed');
+    else if (Object.keys(snap.row ?? {}).length === 0) reason = t('panel.context.pinNoRow');
+    pinBtn.disabled = reason !== '';
+    pinBtn.title = reason || t('panel.context.pinRowHint');
+    const pinned = snap?.pinnedRows?.length ?? 0;
+    pinInfo.textContent = reason || (pinned > 0 ? t('panel.context.pinnedCount', { n: pinned }) : '');
+    pinInfo.hidden = pinInfo.textContent === '';
   }
 
   function renderFields(
@@ -150,5 +173,5 @@ export function createContextView(): ContextView {
     fields.hidden = count === 0;
   }
 
-  return { root: context, historySelect, restoreBtn, renderContext, renderFields };
+  return { root: context, historySelect, restoreBtn, pinBtn, renderContext, renderFields };
 }

@@ -3,6 +3,8 @@ import { buttonStyles } from './button.css.ts';
 import { popupStyles } from './popup.css.ts';
 import { notificationStyles } from './notification.css.ts';
 import { pivotStyles } from './pivot.css.ts';
+import { caseViewStyles } from './case-view.css.ts';
+import { reportDialogStyles } from './report-dialog.css.ts';
 
 let injected = false;
 
@@ -19,6 +21,8 @@ export function injectStyles(): void {
     popupStyles,
     notificationStyles,
     pivotStyles,
+    caseViewStyles,
+    reportDialogStyles,
   ].join('\n');
   document.head.appendChild(style);
 }

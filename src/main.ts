@@ -7,12 +7,14 @@ import { initCatalog } from './core/rules-catalog.ts';
 import { getHealthReport, hasFailure, onHealthChange, onQueryCaptured, refreshHealth } from './core/health.ts';
 import { teardownActiveEditorTracking } from './core/editor-bridge.ts';
 import { log } from './core/log.ts';
-import { initI18n } from './i18n/index.ts';
+import { initI18n, t } from './i18n/index.ts';
 import { installCapture, onCaptureResult } from './capture/interceptor.ts';
 import { sentinelProfile } from './capture/profiles/sentinel.ts';
 import { defenderProfile } from './capture/profiles/defender.ts';
+import { hasOldHistory, isMigrationConfirmed, runMigrationIfNeeded } from './core/migration.ts';
 import { createButton, type ButtonComponent } from './ui/button.ts';
 import { createPivotTrigger, type PivotTriggerComponent } from './ui/pivot-trigger.ts';
+import { showToast } from './ui/notification.ts';
 
 /** Delay before the silent startup health check (N6) */
 const STARTUP_HEALTH_DELAY_MS = 5000;
@@ -34,7 +36,30 @@ function bootstrap(): void {
   log.step('initTheme', initTheme);
   log.step('injectStyles', injectStyles);
   log.step('initCatalog', initCatalog);
+  log.step('runMigrationIfNeeded', runMigrationOnce);
   log.step('observeForHuntingPage', observeForHuntingPage);
+}
+
+/**
+ * One-time, additive copy of the pre-cases journal into a case (N2
+ * "Migration", phase 5c, `core/migration.ts`). Safe to run on every load:
+ * `runMigrationIfNeeded()` is a no-op once `shq_migration_v2` is set, and
+ * the copy itself never writes to the old keys (project rule 8). The
+ * export offer (rule 8 "propose un export avant") is shown BEFORE that
+ * copy runs; the same export stays available from Settings afterwards too,
+ * for as long as the old keys exist (i.e. until the user explicitly
+ * deletes them there).
+ */
+function runMigrationOnce(): void {
+  if (hasOldHistory() && !isMigrationConfirmed()) {
+    showToast(t('notify.migrationOffer'), 'info');
+  }
+  const result = runMigrationIfNeeded();
+  if (result.ran) {
+    showToast(t('notify.migrationDone', { snapshots: result.snapshotsCopied, runs: result.runsCopied }), 'success');
+  } else if (result.reason === 'error') {
+    showToast(t('notify.migrationFailed'), 'error');
+  }
 }
 
 // ── rAF coalescing - a burst of mutations yields at most one pass per frame ──

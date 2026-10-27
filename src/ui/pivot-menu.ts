@@ -1,31 +1,37 @@
 import type {
+  Case,
   CellContext,
   IndicatorId,
   PivotRule,
   PivotSnapshot,
   PlatformAdapter,
 } from '../types.ts';
-import { CSS_PREFIX } from '../config.ts';
+import { CASES, CSS_PREFIX } from '../config.ts';
 import { detectForCell } from '../core/detection.ts';
 import { fillQuery, parseDurationMinutes, parseGridTime } from '../core/pivot.ts';
 import { normalize } from '../core/normalize.ts';
 import { getRulesUrl, onCatalogChange, reloadCatalog, setRulesUrl } from '../core/rules-catalog.ts';
 import { getSetting, resolvePlatformVariant } from '../core/settings.ts';
-import {
-  addStep,
-  clearSnapshots,
-  getSnapshot,
-  listSnapshots,
-  recordSnapshot,
-} from '../core/investigation.ts';
 import { getEditorText, injectQuery, replaceEditorContent } from '../core/editor-bridge.ts';
 import { copyDiagnostics, getHealthReport, onHealthChange, refreshHealth } from '../core/health.ts';
 import { listRecentRuleIds, recordRecentRule } from '../core/recent-rules.ts';
 import { computeKqlHash, registerPendingRun } from '../capture/store.ts';
+import {
+  addStepToSnapshot,
+  checkPivotAllowed,
+  ensureUnassignedCase,
+  getActiveCaseForKey,
+  getCaseSnapshots,
+  pinRowToSnapshot,
+  recordSnapshotInCase,
+} from '../core/cases.ts';
+import { UNKNOWN_KEY } from '../core/tenant.ts';
 import { log } from '../core/log.ts';
 import { t } from '../i18n/index.ts';
 import { showToast } from './notification.ts';
 import { P, el, button } from './panel/shared.ts';
+import { createCaseBar } from './case-bar.ts';
+import { CASE_VIEW_WIDTH, createCaseView } from './case-view.ts';
 import { createSettingsView } from './panel/settings-view.ts';
 import { createHealthView } from './panel/health-view.ts';
 import { createContextView } from './panel/context-view.ts';
@@ -80,7 +86,52 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   headerActions.append(healthBtn, settingsBtn, closeBtn);
   header.appendChild(headerActions);
 
-  const settingsView = createSettingsView(() => renderTypes());
+  // N3 case view (5e-2): a second panel docked on the right. Opened from the
+  // case bar below; it lives and dies with this panel (hide() closes it). A
+  // node click goes through `loadSnapshot`, the same path as the Event selector.
+  const caseView = createCaseView({
+    getCaseId: () => activeCase()?.id,
+    getSelectedSnapshotId: () => snapshotId,
+    onSelectSnapshot: (id) => loadSnapshot(id),
+    onCaseChanged: () => {
+      void caseBarView.refresh();
+      renderContext();
+    },
+    onVisibilityChange: () => {
+      // Keep the Pivot panel clear of the docked view.
+      if (visible) position(parseFloat(panel.style.left) || 0, parseFloat(panel.style.top) || 0);
+    },
+  });
+
+  // N2 "cloisonnement": the case bar is always visible (not toggled like
+  // settings/health) - it is the context every pivot below is scoped to.
+  // Kicked off here (construction time, before the panel is ever opened)
+  // rather than waiting for the first open() - by the time the user
+  // actually opens the panel the async resolution has usually already
+  // landed, so the "resolving…" placeholder is rarely seen in practice.
+  const caseBarView = createCaseBar(platform, {
+    onResolved: () => {
+      // The active case may have changed (switch, create, other tab): the
+      // "Événement" selector lists ITS snapshots, so repaint it, and forget a
+      // selected snapshot that belongs to the previous case.
+      if (snapshotId && !currentSnapshot()) snapshotId = null;
+      if (visible) renderContext();
+      caseView.refresh();
+    },
+    onOpenCaseView: () => {
+      if (caseView.isVisible()) caseView.hide();
+      else caseView.show();
+    },
+  });
+  void caseBarView.refresh();
+  // `getCurrentKey`/`onCasesChanged` are what the 5d case export/import block
+  // in Settings needs: the case bar owns the resolved tenant key, and an
+  // imported case changes which case is active, so the bar must re-resolve.
+  const settingsView = createSettingsView({
+    onTiChange: () => renderTypes(),
+    getCurrentKey: () => caseBarView.getCurrentKey(),
+    onCasesChanged: () => void caseBarView.refresh(),
+  });
   const healthView = createHealthView();
   const contextView = createContextView();
   const paramsView = createParamsView();
@@ -88,6 +139,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
   panel.append(
     header,
+    caseBarView.root,
     settingsView.root,
     healthView.root,
     contextView.root,
@@ -97,8 +149,23 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
   // ── Rendering ──
 
+  /** The active case for the current tenant key; undefined until the case bar has resolved a key. */
+  function activeCase(): Case | undefined {
+    const key = caseBarView.getCurrentKey();
+    return key !== undefined ? getActiveCaseForKey(key) : undefined;
+  }
+
+  /**
+   * Snapshots of the ACTIVE case (5e-1) - the live path no longer reads the
+   * legacy `shq_pivot_snapshots` journal. Empty until the case bar has resolved a key.
+   */
+  function caseSnapshots(): readonly PivotSnapshot[] {
+    const active = activeCase();
+    return active ? getCaseSnapshots(active.id) : [];
+  }
+
   function currentSnapshot(): PivotSnapshot | undefined {
-    return snapshotId ? getSnapshot(snapshotId) : undefined;
+    return snapshotId ? caseSnapshots().find((s) => s.id === snapshotId) : undefined;
   }
 
   function renderTypes(): void {
@@ -123,12 +190,13 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
   function renderContext(): void {
     contextView.renderContext(
-      listSnapshots(),
+      caseSnapshots(),
       currentSnapshot(),
       pendingCtx,
       row,
       paramsView.valueField.input.value,
       onFieldChipClick,
+      activeCase()?.closedAt !== undefined,
     );
   }
 
@@ -151,6 +219,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     renderTypes();
     renderRules();
     if (settingsOpen) renderStatus();
+    caseView.refresh();
   }
 
   // ── Loading a context into the fields ──
@@ -173,7 +242,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   }
 
   function loadSnapshot(id: string): void {
-    const snap = getSnapshot(id);
+    const snap = caseSnapshots().find((x) => x.id === id);
     if (!snap) return;
     snapshotId = snap.id;
     fill(snap);
@@ -187,6 +256,46 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     if (!value) {
       showToast(t('notify.emptyValue'), 'error');
       paramsView.valueField.input.focus();
+      return;
+    }
+
+    // N2 "cloisonnement": a pivot is refused when the active case does not
+    // cover the current tenant key - this is the partitioning actually
+    // taking effect, not just the banner showing it. `getActiveCaseForKey`
+    // re-reads storage fresh (core/cases.ts's own guidance for "W2's pivot
+    // guard"), so a case switched from another tab is seen here even if
+    // this panel's cached case-bar state has not repainted yet. Fails OPEN
+    // (pivot allowed) only if the case bar never managed to resolve ANY key
+    // at all (hard constraint: never throw / never permanently lock the
+    // panel on an internal resolution error) - a resolved 'unknown' key, by
+    // contrast, goes through the guard exactly like any other key.
+    await caseBarView.ensureResolved();
+    const activeKey = caseBarView.getCurrentKey();
+    // 5e-1: the snapshot and its steps are recorded INTO the active case, so a
+    // pivot needs one. `activeKey` is only undefined if resolution never ran
+    // (it always settles, even on failure, see case-bar.ts) - refuse rather
+    // than record into the void.
+    let activeCase = activeKey !== undefined ? getActiveCaseForKey(activeKey) : undefined;
+    // N2 point 4: an UNREADABLE key still allows the pivot, filed in an unassigned case. That case is created
+    // here, lazily - the case bar only resolves (opening a page must not create anything); every other key
+    // with no case is refused below and the user decides where its data goes.
+    if (activeKey === UNKNOWN_KEY && !activeCase) {
+      activeCase = ensureUnassignedCase();
+      await caseBarView.refresh();
+    }
+    if (activeKey === undefined || !activeCase) {
+      showToast(t('caseBar.pivotRefused'), 'error');
+      return;
+    }
+    const guard = checkPivotAllowed(activeCase, activeKey);
+    if (!guard.allowed) {
+      showToast(t('caseBar.pivotRefused'), 'error');
+      return;
+    }
+    // A closed case is read-only (N2): refuse BEFORE the editor is touched, so
+    // a pivot is never injected whose snapshot/step could not be recorded.
+    if (activeCase.closedAt !== undefined) {
+      showToast(t('caseBar.pivotRefusedClosed'), 'error');
       return;
     }
 
@@ -228,7 +337,13 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
         row: {},
         source: 'dom', // no right-click behind this snapshot - nothing was captured/grid-read
       };
-      snapshotId = recordSnapshot(ctx, getEditorText() ?? '', platform.id).id;
+      const recorded = recordSnapshotInCase(activeCase.id, ctx, getEditorText() ?? '', platform.id);
+      if (!recorded.ok) {
+        // Closed/removed since the check above (another tab): nothing injected yet.
+        showToast(t(recorded.reason === 'closed' ? 'caseBar.pivotRefusedClosed' : 'caseBar.pivotRefused'), 'error');
+        return;
+      }
+      snapshotId = recorded.snapshot.id;
       pendingCtx = null;
     }
 
@@ -273,7 +388,14 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       log.debug(`pivot-menu: runRule - platform.runQuery() -> ${runOutcome}`);
     }
 
-    if (snapshotId) addStep(snapshotId, { ruleId: rule.id, value: normalizedValue, indicator: selected });
+    if (snapshotId) {
+      const stepResult = addStepToSnapshot(activeCase.id, snapshotId, {
+        ruleId: rule.id,
+        value: normalizedValue,
+        indicator: selected,
+      });
+      if (!stepResult.ok) log.warn('pivot-menu: step not recorded', { reason: stepResult.reason });
+    }
     recordRecentRule(rule.id);
     recentRuleIds = listRecentRuleIds();
     hide();
@@ -309,6 +431,25 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
   contextView.restoreBtn.addEventListener('click', restoreSource);
 
+  contextView.pinBtn.addEventListener('click', () => {
+    const snap = currentSnapshot();
+    const active = activeCase();
+    if (!snap || !active) return;
+    // The snapshot's own stored row, not whatever the panel fields show now.
+    const result = pinRowToSnapshot(active.id, snap.id, snap.row);
+    if (result.ok) {
+      showToast(t(result.added ? 'notify.rowPinned' : 'notify.rowAlreadyPinned', { n: result.count }), result.added ? 'success' : 'info');
+    } else if (result.reason === 'limit') {
+      showToast(t('notify.pinLimit', { max: CASES.MAX_PINNED_ROWS }), 'error');
+    } else if (result.reason === 'closed') {
+      showToast(t('caseBar.pivotRefusedClosed'), 'error');
+    } else {
+      showToast(t('notify.pinFailed'), 'error');
+    }
+    renderContext();
+    caseView.refresh();
+  });
+
   settingsBtn.addEventListener('click', () => {
     settingsOpen = !settingsOpen;
     settingsView.root.hidden = !settingsOpen;
@@ -317,6 +458,9 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       settingsView.urlField.input.value = getRulesUrl();
       renderStatus();
       settingsView.renderTi();
+      settingsView.renderClients();
+      settingsView.renderMigration();
+      settingsView.renderCaseTransfer();
     }
   });
 
@@ -356,13 +500,11 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   settingsView.saveUrlBtn.addEventListener('click', () => reload(settingsView.urlField.input.value));
   settingsView.defaultUrlBtn.addEventListener('click', () => reload(''));
 
-  settingsView.clearHistoryBtn.addEventListener('click', () => {
-    clearSnapshots();
-    snapshotId = null;
-    renderContext();
-    renderRules();
-    showToast(t('notify.historyCleared'), 'info');
-  });
+  // "Effacer l'historique" used to live here as an unconditional
+  // `clearSnapshots()` - now superseded by the migration-aware "Supprimer
+  // l'ancien historique" in Settings (N2, phase 5c, `core/migration.ts`),
+  // which only deletes the OLD pre-cases keys, and only once they are
+  // confirmed copied into a case. See `settings-view.ts`'s Migration block.
 
   const unsubscribeCatalog = onCatalogChange(() => {
     if (!visible) return;
@@ -387,7 +529,8 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
   function position(x: number, y: number): void {
     const rect = panel.getBoundingClientRect();
-    const maxX = window.innerWidth - rect.width - MARGIN;
+    const reserved = caseView.isVisible() ? CASE_VIEW_WIDTH : 0;
+    const maxX = window.innerWidth - rect.width - MARGIN - reserved;
     const maxY = window.innerHeight - rect.height - MARGIN;
     panel.style.left = `${Math.max(MARGIN, Math.min(x, maxX))}px`;
     panel.style.top = `${Math.max(MARGIN, Math.min(y, maxY))}px`;
@@ -401,6 +544,11 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     }
     position(x, y);
     rulesView.resetView();
+    // Quietly re-resolve on every open (a case/client may have changed in
+    // another tab, or in Settings since this panel was last shown) - the
+    // bar keeps showing its last known state while this runs, see
+    // case-bar.ts's own doc comment on why that does not flicker.
+    void caseBarView.refresh();
   }
 
   /** Read once per open (#17), before renderAll() so renderRules() sees it right away */
@@ -421,7 +569,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   function showHistory(x: number, y: number): void {
     pendingCtx = null;
     loadRecentRules();
-    const latest = listSnapshots()[0];
+    const latest = caseSnapshots()[0];
     if (latest) {
       snapshotId = latest.id;
       fill(latest);
@@ -438,6 +586,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     if (!visible) return;
     visible = false;
     document.removeEventListener('keydown', onKeyDown, true);
+    caseView.hide();
     overlay.remove();
     panel.remove();
   }
@@ -451,6 +600,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       hide();
       unsubscribeCatalog();
       unsubscribeHealth();
+      caseView.destroy();
     },
   };
 }

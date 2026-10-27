@@ -39,6 +39,11 @@ export function initI18n(): void {
   log.debug(`i18n: setting=${lang} navigator=${navigator.language} -> ${currentLang}`);
 }
 
+/** Language the UI resolved to (`initI18n()`), for output that must declare it (the HTML report's `lang`). */
+export function getLang(): UiLang {
+  return currentLang;
+}
+
 export type MessageParams = Record<string, string | number>;
 
 function interpolate(template: string, params: MessageParams | undefined): string {

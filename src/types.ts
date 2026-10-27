@@ -203,6 +203,24 @@ export interface PivotSnapshot extends CellContext {
   /** Rule id of the last pivot query found in sourceQuery, if any */
   readonly originRuleId: string;
   readonly steps: readonly PivotStep[];
+  // ── Graph fields (N3, phase 5e). All optional: snapshots stored before 5e,
+  // or copied by the 5c migration, carry none of them and stay valid roots. ──
+  /** Case this snapshot was recorded in (set by `core/cases.ts`) */
+  readonly caseId?: string;
+  /**
+   * Snapshot of the pivot whose RESULT this event was right-clicked in. Set
+   * only when the clicked cell's `runId` is a run of the same case that is
+   * itself linked to a snapshot - never inferred from timing.
+   */
+  readonly parentSnapshotId?: string;
+  /** The `QueryRun` (displayed result) the right-click happened in; pairs with `parentSnapshotId` */
+  readonly parentRunId?: string;
+  /** `QueryRun`s executed from this snapshot's pivots (see `capture/store.ts` `attach.snapshotId`) */
+  readonly runIds?: readonly string[];
+  /** Analyst's free-text note on this node (customer data - masked in exports) */
+  readonly note?: string;
+  /** Full rows pinned as evidence (customer data - masked in exports) */
+  readonly pinnedRows?: readonly Readonly<Record<string, string>>[];
 }
 
 // ── Network capture (N1, phase 4c) ──
@@ -233,9 +251,10 @@ export interface RunSummary {
 }
 
 /**
- * One captured query execution (`capture/store.ts`). `caseId` is a
- * placeholder (`'unassigned'`, see `UNASSIGNED_CASE_ID`) until phase 5 adds
- * `core/cases.ts` — every run uses the same literal for now.
+ * One captured query execution (`capture/store.ts`). `caseId` is the active
+ * case's id when the run was stored in a case body (5e-1), or the placeholder
+ * `'unassigned'` (`UNASSIGNED_CASE_ID`) for a run that fell back to the legacy
+ * per-tenant buffer (no active case, closed case).
  */
 export interface QueryRun {
   readonly id: string;
@@ -261,6 +280,66 @@ export interface QueryRun {
   /** Capped sample, see retention rules in `capture/store.ts`; absent when not kept */
   readonly rowsSample?: readonly (readonly unknown[])[];
   readonly lastAccessAt: number;
+}
+
+// ── Client registry (N2, phase 5a) ──
+//
+// The only place in the product where a Defender `tid` and a Sentinel
+// workspace resourceId are stored in clear text (core/clients.ts) — the user
+// types them once to recognise her own customers, because the two platforms
+// share no common identifier in their URLs (21/10 survey). Never spread into
+// a case export, a report, an issue or the health diagnostics text.
+export interface Client {
+  readonly id: string;
+  readonly name: string;
+  /** Clear text, local only — never logged, never exported with a case. */
+  readonly defenderTids: readonly string[];
+  /** Full resourceIds, lowercase, clear text, local only. */
+  readonly sentinelWorkspaces: readonly string[];
+  readonly createdAt: number;
+  readonly notes?: string;
+  /** Detected Defender variant, remembered per client (#7) */
+  readonly variant?: PlatformVariant;
+}
+
+// ── Cases (N2, phase 5b) ──
+//
+// A case groups the investigation data (snapshots, QueryRuns, notes) of one
+// customer across however many tenant keys belong to it (a Sentinel
+// workspace + a Defender tenant of the same customer share no identifier of
+// their own - core/clients.ts's registry is what links them). `clientId` is
+// an opaque id, `tenantKeys` are hashed keys: never a `tid`, a resourceId or
+// a client name reaches `shq_cases`/`shq_case_<id>` (core/cases.ts), only
+// `shq_clients` holds those in clear text (core/clients.ts).
+/** Cases EasyPivot provisions itself: the unreadable-tenant catch-all and the pre-case history. */
+export type SystemCaseKind = 'unassigned' | 'migration';
+
+export interface Case {
+  readonly id: string;
+  readonly name: string;
+  readonly clientId?: string;
+  readonly tenantKeys: readonly TenantKey[];
+  readonly createdAt: number;
+  readonly lastAccessAt: number;
+  /** Set -> the case is read-only: no new snapshot/run/note can be added. */
+  readonly closedAt?: number;
+  /** Set -> hidden from the case list (not deleted); purge is phase 5c/5f. */
+  readonly archivedAt?: number;
+  readonly tags: readonly string[];
+  readonly notes: string;
+  /**
+   * Stable marker of a case EasyPivot created itself (see `core/cases.ts`
+   * `systemKindOf`). Optional so cases stored before it existed still parse;
+   * the UI maps it to a translated display name, `name` stays as stored.
+   */
+  readonly system?: SystemCaseKind;
+  /** Typed per the Annexes; phase 6 (N4) is what actually reads/writes it. */
+  readonly playbook?: {
+    readonly id: string;
+    readonly step: number;
+    readonly done: readonly string[];
+    readonly values: Readonly<Record<string, string>>;
+  };
 }
 
 // ── Editor insertion & run (W2 step 6, #13/#22) ──

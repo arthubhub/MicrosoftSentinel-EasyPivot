@@ -2,9 +2,20 @@ import type { PlatformId } from '../types.ts';
 import type { ParsedColumn, QueryRun, RunSummary, TenantKey } from '../types.ts';
 import type { CaptureOutcome } from './interceptor.ts';
 import { CAPTURE_STORE, STORAGE_KEYS } from '../config.ts';
-import { getSettings } from '../core/settings.ts';
-import { getJson, setJson } from '../core/storage.ts';
+import { DEFAULT_CLOSED_DAYS, getSettings } from '../core/settings.ts';
+import { deleteKey, getJson, setJson } from '../core/storage.ts';
 import { sentinelKey, defenderKey } from '../core/tenant.ts';
+import {
+  appendLiveRunToCase,
+  deleteAllCases,
+  getActiveCaseForKey,
+  getClosedCaseTimes,
+  getCaseTotals,
+  readAllCaseRuns,
+  replaceCaseRuns,
+  unlinkRun,
+  type RemovalCounts,
+} from '../core/cases.ts';
 import { log } from '../core/log.ts';
 import { summarizeRun } from './summary.ts';
 import { sanitizeRows, sanitizeTopValues } from './sanitize.ts';
@@ -15,23 +26,25 @@ import { sanitizeRows, sanitizeTopValues } from './sanitize.ts';
  * point that creates a run, and it is never allowed to throw into the page
  * (project rule: capture is all `try/catch`).
  *
- * Storage: `shq_runs_<tenantKey>`, a circular buffer of the 50 most recent
- * `QueryRun`s. **Provisional**: the Annexes mark this key "avant l'arrivée
- * des cas (phase 4), migrés en phase 5" - phase 5's `core/cases.ts` will
- * move these into `shq_case_<id>` and this module's buffer becomes history.
+ * Storage, since 5e-1: a run captured while the tenant key has an ACTIVE,
+ * OPEN case is stored in that case's body (`shq_case_<id>`, via
+ * `core/cases.ts`'s `appendLiveRunToCase`) and carries its real `caseId`, so
+ * `getCaseRuns(caseId)` - and the graph built on it - sees live work. Only
+ * when there is no such case (a real key whose case the user has not created
+ * yet, a closed case, a storage failure) does it fall back to the legacy
+ * `shq_runs_<tenantKey>` circular buffer (50 per tenant) with
+ * `UNASSIGNED_CASE_ID`; the 5c migration copies those into cases later.
  *
- * `caseId` placeholder: `UNASSIGNED_CASE_ID` ('unassigned'), matching the
- * convention `core/tenant.ts` already uses for an unresolved tenant
- * ('unknown') and N2's own wording ("routé vers un cas 'non assigné'").
- * No `Case` type exists yet; every run gets this same literal until phase
- * 5's migration assigns real case ids.
+ * RETENTION covers BOTH homes (`purgeNow` below): runs hold up to 200 rows
+ * of customer data, so moving them into case bodies must not move them out
+ * of reach of `retention.days` / `maxBytes` / "Purger maintenant".
  *
  * `core/storage.ts` is the only storage dependency (project constraint);
  * every write goes through `safeSetJson` below so a full quota
  * (`GM_setValue` throwing) can never reach the interceptor's callback.
  */
 
-// ── Placeholder case id (phase 5 migrates this away) ──
+// ── Placeholder case id for runs that fall back to the tenant buffer (see header) ──
 
 export const UNASSIGNED_CASE_ID = 'unassigned';
 
@@ -135,6 +148,28 @@ let lastResolvedTenantKey: TenantKey | null = null;
 /** The TenantKey `addRun()` last resolved, or `null` if none has run yet (this load). */
 export function getLastResolvedTenantKey(): TenantKey | null {
   return lastResolvedTenantKey;
+}
+
+// `interceptor.ts`'s `onCaptureResult` fires synchronously, BEFORE `addRun()` has resolved the key (it is
+// async), so a UI listener there would read the previous key. This one fires right after the key is set,
+// and only when it actually CHANGED (first capture, or another tenant) - nothing to poll, no no-op repaints.
+const tenantKeyListeners = new Set<(key: TenantKey) => void>();
+
+export function onTenantKeyChanged(fn: (key: TenantKey) => void): () => void {
+  tenantKeyListeners.add(fn);
+  return () => tenantKeyListeners.delete(fn);
+}
+
+function setLastResolvedTenantKey(key: TenantKey): void {
+  if (key === lastResolvedTenantKey) return;
+  lastResolvedTenantKey = key;
+  for (const fn of tenantKeyListeners) {
+    try {
+      fn(key);
+    } catch (err) {
+      log.error('capture/store: tenant key listener threw', err);
+    }
+  }
 }
 
 // ── Pivot linkage: `// [RULE-ID]` header + W2's `pendingRun` ──
@@ -273,7 +308,7 @@ export async function addRun(outcome: CaptureOutcome): Promise<QueryRun | null> 
       resolveTenantKey(profile.platform, query?.tenantKey),
       computeKqlHash(kql),
     ]);
-    lastResolvedTenantKey = tenantKey; // 4g: see getLastResolvedTenantKey()'s doc comment
+    setLastResolvedTenantKey(tenantKey); // 4g: see getLastResolvedTenantKey()'s doc comment
 
     const headerRuleId = parseRuleIdHeader(kql);
     const attach = tryAttachPendingRun(headerRuleId, kqlHash);
@@ -345,12 +380,44 @@ export async function addRun(outcome: CaptureOutcome): Promise<QueryRun | null> 
       sampleRows: run.rowsSample?.length ?? 0,
     });
 
-    pushRun(tenantKey, run);
-    return run;
+    return storeRun(tenantKey, run);
   } catch (err) {
     log.error('capture/store: addRun() failed, run not stored', err);
     return null;
   }
+}
+
+/**
+ * Home of a freshly captured run: the active case for `tenantKey` if there is
+ * one that accepts it (open, covers the key), else the legacy tenant buffer.
+ * Synchronous on purpose (no await between reading the active case and
+ * writing): `getActiveCaseForKey` reads the remembered case, it never runs
+ * the (async) resolution rule - that already ran when the panel resolved the
+ * key. Never throws: any failure falls back to the buffer.
+ */
+function storeRun(tenantKey: TenantKey, run: QueryRun): QueryRun {
+  try {
+    const active = getActiveCaseForKey(tenantKey);
+    if (active && active.tenantKeys.includes(tenantKey)) {
+      const stamped: QueryRun = { ...run, caseId: active.id };
+      // `appendLiveRunToCase` drops a `snapshotId`/`ruleId` whose snapshot is not in `active` (the pending
+      // pivot may have been recorded under another key, hence in another case) and returns the run AS STORED.
+      const res = appendLiveRunToCase(active.id, stamped);
+      if (res.ok) {
+        if (res.linkDropped) log.info('capture/store: run stored unlinked, its pivot snapshot is not in the case', { droppedLinks: 1 });
+        return res.run;
+      }
+      log.info('capture/store: active case refused the run, using the tenant buffer', { caseId: active.id, reason: res.reason });
+    }
+  } catch (err) {
+    log.error('capture/store: storing the run in its case failed, using the tenant buffer', err);
+  }
+  // The buffer belongs to no case, so a snapshot link cannot be valid there: it would dangle (and the
+  // 5c migration would copy it into a case that does not hold the snapshot). Header-only ruleIds stay.
+  const buffered = run.snapshotId !== undefined ? unlinkRun(run) : run;
+  if (buffered !== run) log.info('capture/store: run buffered unlinked, no case holds its pivot snapshot', { droppedLinks: 1 });
+  pushRun(tenantKey, buffered);
+  return buffered;
 }
 
 function pushRun(tenantKey: TenantKey, run: QueryRun): void {
@@ -374,6 +441,8 @@ export type PurgeScope = 'all' | TenantKey;
 export interface PurgeReport {
   readonly tenantsVisited: number;
   readonly samplesDroppedByAge: number;
+  /** Samples dropped because their case has been closed for `retention.closedDays` (not counted in `samplesDroppedByAge`). */
+  readonly samplesDroppedByClosedCase: number;
   readonly samplesDroppedByBytes: number;
   readonly runsDroppedByBytes: number;
   readonly bytesBefore: number;
@@ -384,13 +453,24 @@ function msPerDay(days: number): number {
   return days * 24 * 60 * 60 * 1000;
 }
 
-/** Drop `rowsSample` on every run whose `lastAccessAt` is older than `retention.days`. `days = 0` -> every sample. */
-function purgeSamplesByAge(runs: readonly QueryRun[], retentionDays: number, now: number): { runs: QueryRun[]; dropped: number } {
+/**
+ * Drop `rowsSample` on every run older than `retentionDays`. Age is measured
+ * from the run's `lastAccessAt`, or from `since` when given (a closed case's
+ * `closedAt`). `retentionDays = 0` -> every sample.
+ */
+function purgeSamplesByAge(
+  runs: readonly QueryRun[],
+  retentionDays: number,
+  now: number,
+  include?: (run: QueryRun) => boolean,
+  since?: number,
+): { runs: QueryRun[]; dropped: number } {
   const thresholdMs = msPerDay(retentionDays);
   let dropped = 0;
   const next = runs.map((r) => {
     if (r.rowsSample === undefined) return r;
-    const age = now - r.lastAccessAt;
+    if (include && !include(r)) return r;
+    const age = now - (since ?? r.lastAccessAt);
     if (age >= thresholdMs) {
       dropped++;
       log.info('capture/store: purge - dropping sample (age)', {
@@ -398,6 +478,7 @@ function purgeSamplesByAge(runs: readonly QueryRun[], retentionDays: number, now
         ruleId: r.ruleId ?? null,
         ageMs: age,
         thresholdMs,
+        closedCase: since !== undefined,
       });
       return { ...r, rowsSample: undefined };
     }
@@ -421,10 +502,10 @@ function estimateBytes(runs: readonly QueryRun[]): number {
  * run's sample/run itself is never evicted by the byte cap alone).
  */
 function purgeByMaxBytes(
-  tenants: Map<TenantKey, QueryRun[]>,
+  tenants: Map<string, QueryRun[]>,
   maxBytes: number,
-): { samplesDropped: number; runsDropped: number; changed: Set<TenantKey> } {
-  const changed = new Set<TenantKey>();
+): { samplesDropped: number; runsDropped: number; changed: Set<string> } {
+  const changed = new Set<string>();
   let samplesDropped = 0;
   let runsDropped = 0;
 
@@ -432,7 +513,7 @@ function purgeByMaxBytes(
 
   // Pass 1: oldest samples first, anywhere.
   while (totalBytes() > maxBytes) {
-    let oldest: { tenantKey: TenantKey; index: number; lastAccessAt: number } | null = null;
+    let oldest: { tenantKey: string; index: number; lastAccessAt: number } | null = null;
     for (const [tenantKey, runs] of tenants) {
       for (let i = 0; i < runs.length; i++) {
         if (runs[i].rowsSample === undefined) continue;
@@ -451,7 +532,7 @@ function purgeByMaxBytes(
 
   // Pass 2: oldest unlinked runs (no ruleId), anywhere.
   while (totalBytes() > maxBytes) {
-    let oldest: { tenantKey: TenantKey; index: number; lastAccessAt: number } | null = null;
+    let oldest: { tenantKey: string; index: number; lastAccessAt: number } | null = null;
     for (const [tenantKey, runs] of tenants) {
       for (let i = 0; i < runs.length; i++) {
         if (runs[i].ruleId !== undefined) continue; // never evict a pivot-linked run here
@@ -486,10 +567,16 @@ export function purgeNow(scope: PurgeScope): PurgeReport {
   const now = Date.now();
   const allKeys = getKnownTenantKeys();
   const ageSweepKeys = scope === 'all' ? allKeys : [scope];
+  // Runs stored in case bodies (5e-1) follow the same rules as the buffers:
+  // for a single-tenant scope only that tenant's runs are swept.
+  const inScope = scope === 'all' ? undefined : (r: QueryRun): boolean => r.tenantKey === scope;
 
-  const bytesBefore = allKeys.reduce((sum, k) => sum + estimateBytes(readRuns(k)), 0);
+  const bufferBytes = (): number => allKeys.reduce((sum, k) => sum + estimateBytes(readRuns(k)), 0);
+  const caseBytes = (): number => [...readAllCaseRuns().values()].reduce((sum, runs) => sum + estimateBytes(runs), 0);
+  const bytesBefore = bufferBytes() + caseBytes();
 
   let samplesDroppedByAge = 0;
+  let samplesDroppedByClosedCase = 0;
   for (const tenantKey of ageSweepKeys) {
     const runs = readRuns(tenantKey);
     if (runs.length === 0) continue;
@@ -498,26 +585,50 @@ export function purgeNow(scope: PurgeScope): PurgeReport {
     samplesDroppedByAge += dropped;
   }
 
-  // retention.closedDays (purge a CLOSED case's samples after 7 days) has
-  // no code path: it is defined against `Case.closedAt`, and cases do not
-  // exist until phase 5's `core/cases.ts`. Nothing to do here - documented,
-  // not faked.
-
-  const tenantsMap = new Map<TenantKey, QueryRun[]>(allKeys.map((k) => [k, readRuns(k)] as const));
-  const { samplesDropped: samplesDroppedByBytes, runsDropped: runsDroppedByBytes, changed } = purgeByMaxBytes(
-    tenantsMap,
-    settings.retention.maxBytes,
-  );
-  for (const tenantKey of changed) {
-    const runs = tenantsMap.get(tenantKey);
-    if (runs) writeRuns(tenantKey, runs);
+  // `retention.closedDays`: a CLOSED case's samples go once `now - closedAt >= closedDays` days (measured from
+  // closing, not from the run). `0` = at the next purge after the case is closed. Open cases are not affected;
+  // `retention.days` below still applies to every case. Summary, columns, snapshots (incl. pinned rows) and
+  // notes are kept, same as `retention.days`. An unusable stored value falls back to the default (7), never to "keep forever".
+  const rawClosedDays = settings.retention.closedDays;
+  const closedDays = Number.isFinite(rawClosedDays) && rawClosedDays >= 0 ? rawClosedDays : DEFAULT_CLOSED_DAYS;
+  const closedAtByCase = getClosedCaseTimes();
+  for (const [caseId, runs] of readAllCaseRuns()) {
+    let current: QueryRun[] = runs;
+    let droppedByClosed = 0;
+    const closedAt = closedAtByCase.get(caseId);
+    if (closedAt !== undefined) {
+      const r = purgeSamplesByAge(current, closedDays, now, inScope, closedAt);
+      current = r.runs;
+      droppedByClosed = r.dropped;
+      samplesDroppedByClosedCase += r.dropped;
+    }
+    const byAge = purgeSamplesByAge(current, settings.retention.days, now, inScope);
+    samplesDroppedByAge += byAge.dropped;
+    if (byAge.dropped > 0 || droppedByClosed > 0) replaceCaseRuns(caseId, byAge.runs);
   }
 
-  const bytesAfter = allKeys.reduce((sum, k) => sum + estimateBytes(readRuns(k)), 0);
+  // Global cap over BOTH homes. Bucket names are only labels for the
+  // generic purge below: `t:<tenantKey>` = legacy buffer, `c:<caseId>` = case body.
+  const buckets = new Map<string, QueryRun[]>();
+  for (const k of allKeys) buckets.set(`t:${k}`, readRuns(k));
+  for (const [caseId, runs] of readAllCaseRuns()) buckets.set(`c:${caseId}`, runs);
+  const { samplesDropped: samplesDroppedByBytes, runsDropped: runsDroppedByBytes, changed } = purgeByMaxBytes(
+    buckets,
+    settings.retention.maxBytes,
+  );
+  for (const bucket of changed) {
+    const runs = buckets.get(bucket);
+    if (!runs) continue;
+    if (bucket.startsWith('t:')) writeRuns(bucket.slice(2), runs);
+    else replaceCaseRuns(bucket.slice(2), runs);
+  }
+
+  const bytesAfter = bufferBytes() + caseBytes();
 
   const report: PurgeReport = {
     tenantsVisited: ageSweepKeys.length,
     samplesDroppedByAge,
+    samplesDroppedByClosedCase,
     samplesDroppedByBytes,
     runsDroppedByBytes,
     bytesBefore,
@@ -527,10 +638,56 @@ export function purgeNow(scope: PurgeScope): PurgeReport {
   return report;
 }
 
+export interface DeleteAllCaptureResult extends RemovalCounts {
+  /** Legacy `shq_runs_<tenantKey>` buffers removed, and the runs they held. */
+  readonly bufferTenants: number;
+  readonly bufferRuns: number;
+}
+
+/** Everything a "delete all" will remove, as numbers only (no name, no key): for the confirmation text. */
+export function countAllCaptureData(): { readonly cases: number; readonly runs: number; readonly bufferRuns: number } {
+  const totals = getCaseTotals();
+  const bufferRuns = getKnownTenantKeys().reduce((sum, k) => sum + readRuns(k).length, 0);
+  return { cases: totals.cases, runs: totals.runs + bufferRuns, bufferRuns };
+}
+
+/**
+ * "Delete ALL cases and capture data" (every client): every case (body, index
+ * entry, active pointers - `core/cases.ts` `deleteAllCases`) plus the legacy
+ * per-tenant run buffers `shq_runs_<tenantKey>` and their index. NOT touched,
+ * on purpose: `shq_clients` (its own Settings section), `shq_settings`, and
+ * `shq_pivot_snapshots` (project rule 8: only the Migration section may delete
+ * the old journal, after a confirmed migration). Never throws.
+ */
+export function deleteAllCaptureData(): DeleteAllCaptureResult {
+  const cases = deleteAllCases();
+  let bufferTenants = 0;
+  let bufferRuns = 0;
+  try {
+    for (const key of getKnownTenantKeys()) {
+      const n = readRuns(key).length;
+      deleteKey(runsKey(key));
+      bufferTenants++;
+      bufferRuns += n;
+    }
+    deleteKey(STORAGE_KEYS.RUNS_INDEX);
+  } catch (err) {
+    log.error('capture/store: deleting the tenant run buffers failed', err);
+  }
+  pendingRun = null; // a pending pivot points at a snapshot that no longer exists
+  log.info('capture/store: all cases and capture data deleted', { ...cases, bufferTenants, bufferRuns });
+  return { ...cases, bufferTenants, bufferRuns };
+}
+
 /** Rough JSON-length size, current tenant (`scope`) or everything (`'all'`) - for a size indicator UI. */
 export function estimateStoreBytes(scope: PurgeScope): number {
   const keys = scope === 'all' ? getKnownTenantKeys() : [scope];
-  return keys.reduce((sum, k) => sum + estimateBytes(readRuns(k)), 0);
+  const buffers = keys.reduce((sum, k) => sum + estimateBytes(readRuns(k)), 0);
+  const cases = [...readAllCaseRuns().values()].reduce(
+    (sum, runs) => sum + estimateBytes(scope === 'all' ? runs : runs.filter((r) => r.tenantKey === scope)),
+    0,
+  );
+  return buffers + cases;
 }
 
 let schedulerStarted = false;

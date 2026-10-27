@@ -46,11 +46,11 @@ export interface Settings {
    * Retention (N1, phase 4c). `days` (default 30) governs how long a
    * `QueryRun`'s SAMPLE survives after its `lastAccessAt` - the run's
    * summary/columns are never deleted by `days` alone, see `capture/store.ts`.
-   * `closedDays` (default 7) is read and stored for forward compatibility
-   * but has no code path yet: it is defined against `Case.closedAt`, and
-   * cases do not exist until phase 5. `maxBytes` (storage probe, N6, and
-   * now also the capture store's global cap) is the only field phase 1
-   * implemented.
+   * `closedDays` (default 7) does the same for the runs of a CLOSED case,
+   * counted from `Case.closedAt` instead of `lastAccessAt` (`0` = at the next
+   * purge after the case is closed); both rules apply, the shorter one wins.
+   * Neither is editable in the Settings UI: set by hand in storage.
+   * `maxBytes` (storage probe, N6, and also the capture store's global cap).
    */
   readonly retention: { readonly maxBytes: number; readonly days: number; readonly closedDays: number };
   /**
@@ -91,7 +91,17 @@ export interface Settings {
      */
     readonly sanitizeValues: boolean;
   };
+  /**
+   * Report masking (N3, phase 5f, `core/redact.ts`). `redact` defaults to
+   * `true`: a generated report or a case export is masked unless the user
+   * explicitly opts out (checkbox in the later report UI) - the N2 case
+   * export is "masqué par défaut" and this is the setting that enforces it.
+   */
+  readonly report: { readonly redact: boolean };
 }
+
+/** Default of `retention.closedDays`; `capture/store.ts` falls back to it when the stored value is not a usable number. */
+export const DEFAULT_CLOSED_DAYS = 7;
 
 const DEFAULTS: Settings = {
   lang: 'auto',
@@ -99,9 +109,10 @@ const DEFAULTS: Settings = {
   insertMode: 'append',
   autoRun: false,
   logLevel: 'debug',
-  retention: { maxBytes: 20_000_000, days: 30, closedDays: 7 },
+  retention: { maxBytes: 20_000_000, days: 30, closedDays: DEFAULT_CLOSED_DAYS },
   ti: { providers: [], custom: [] },
   capture: { enabled: true, debug: false, maxRowsSample: 200, keepSampleForManual: false, sanitizeValues: false },
+  report: { redact: true },
 };
 
 /**
