@@ -1,6 +1,9 @@
 import type { CellContext } from '../types.ts';
 import { PIVOT, SELECTORS } from '../config.ts';
 import { parseGridTime } from '../core/pivot.ts';
+import { log } from '../core/log.ts';
+import { getLastCapture } from '../capture/interceptor.ts';
+import { matchCapturedRow } from '../capture/match-row.ts';
 
 /**
  * Reading the Defender results grid (Fluent UI v8 DetailsList).
@@ -76,7 +79,21 @@ export function readFluentCellContext(target: Element): CellContext | null {
   const value = valueOf(valueEl);
 
   const rowEl = cell.closest(D.GRID_ROW);
-  const row = rowEl ? readRow(rowEl) : {};
+  let row: Record<string, string> = rowEl ? readRow(rowEl) : {};
+  let source: CellContext['source'] = 'dom';
+  let runId: string | undefined;
+
+  // Tier 1 (#14): the last captured QueryRun, matched by trustworthy cells.
+  // No tier 2 here: Defender's grid renders every column of a visible row
+  // (only ROWS are virtualized, not columns - see file header above), so
+  // there is no "off-screen column" problem for a grid-API tier to solve on
+  // this platform; a failed tier 1 falls straight through to tier 3 (DOM).
+  const match = matchCapturedRow(row, getLastCapture('defender'));
+  if (match) {
+    row = match.row;
+    source = 'capture';
+    runId = match.runId;
+  }
 
   let t0 = '';
   let t0Raw = '';
@@ -84,6 +101,10 @@ export function readFluentCellContext(target: Element): CellContext | null {
   if (timeCol && rowEl) {
     // The raw value carries its zone (…Z): the utc flag only covers values without one
     t0 = parseGridTime(row[timeCol], true);
+    // Display text comes from the DOM regardless of which tier supplied
+    // `row`: it documents what was ON SCREEN, and tier 1 does not change
+    // that. Absent from the DOM (a column tier 1 added that is not even a
+    // displayed grid column) -> falls back to the raw value itself.
     t0Raw = displayedTime(rowEl, timeCol) || row[timeCol];
   }
 
@@ -92,7 +113,9 @@ export function readFluentCellContext(target: Element): CellContext | null {
 
   const entityName = entityNameOf(valueEl);
 
-  return { value, column, t0, t0Raw, host, row, entityName };
+  log.debug('fluent-grid: row read', { column, source, runId, rowFields: Object.keys(row).length });
+
+  return { value, column, t0, t0Raw, host, row, entityName, source, runId };
 }
 
 /** The most recently opened cell menu */

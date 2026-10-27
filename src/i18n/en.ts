@@ -105,6 +105,8 @@ export const en: Record<MessageKey, string> = {
   'notify.invalidT0': 'Invalid T0: expected ISO format (2026-10-08T09:21:14Z)',
   'notify.timeSelectorHint': ' Time picker: "Set in query"',
   'notify.ruleInjected': '{id} injected.{hint}',
+  'notify.ruleInjectedNewTabFallback':
+    '{id} injected (new tab not available: a single editor is shared across tabs, appended instead).{hint}',
   'notify.ruleCopied': '{id} copied to clipboard',
   'notify.injectFailed': 'Could not inject the query',
   'notify.clipboardDenied': 'Clipboard access denied, query not copied',
@@ -178,5 +180,20 @@ export const en: Record<MessageKey, string> = {
   'health.storage.ok': '{pct}% used',
   'health.storage.warn': '{pct}% used (80% threshold exceeded)',
   'health.storage.fail': 'quota exceeded ({pct}%)',
-  'health.pending': 'not available yet (phase 4)',
+  'health.capture.disabled': 'capture disabled (setting)',
+  'health.capture.notYet': 'no captured query observed yet',
+  'health.capture.ok': '{n} query run(s) captured since load',
+  'health.capture.unparsed': 'request seen but not parsed ({n})',
+  'health.tenantKey.ok': 'tenant key resolved',
+  'health.tenantKey.warn': 'no tenant key resolved (pivot still allowed)',
+  // ── Capture storage (N1 purge) ──
+  'settings.purge.title': 'Capture storage',
+  'settings.sanitize.label': 'Mask stored values',
+  'settings.sanitize.hint':
+    'Digits and letters replaced at random, shape kept (1.2.3.4 still looks like an IP). '
+    + 'Only affects queries captured from now on.',
+  'settings.purge.button': 'Purge now',
+  'settings.purge.size': '{mb} MB used by captured results',
+  'settings.purge.done':
+    'Purged: {samples} sample(s) and {runs} query/queries removed, {mb} MB left',
 };

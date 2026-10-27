@@ -10,7 +10,7 @@ import { detectForCell } from '../core/detection.ts';
 import { fillQuery, parseDurationMinutes, parseGridTime } from '../core/pivot.ts';
 import { normalize } from '../core/normalize.ts';
 import { getRulesUrl, onCatalogChange, reloadCatalog, setRulesUrl } from '../core/rules-catalog.ts';
-import { resolvePlatformVariant } from '../core/settings.ts';
+import { getSetting, resolvePlatformVariant } from '../core/settings.ts';
 import {
   addStep,
   clearSnapshots,
@@ -21,6 +21,7 @@ import {
 import { getEditorText, injectQuery, replaceEditorContent } from '../core/editor-bridge.ts';
 import { copyDiagnostics, getHealthReport, onHealthChange, refreshHealth } from '../core/health.ts';
 import { listRecentRuleIds, recordRecentRule } from '../core/recent-rules.ts';
+import { computeKqlHash, registerPendingRun } from '../capture/store.ts';
 import { log } from '../core/log.ts';
 import { t } from '../i18n/index.ts';
 import { showToast } from './notification.ts';
@@ -225,6 +226,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
         t0Raw: '',
         host,
         row: {},
+        source: 'dom', // no right-click behind this snapshot - nothing was captured/grid-read
       };
       snapshotId = recordSnapshot(ctx, getEditorText() ?? '', platform.id).id;
       pendingCtx = null;
@@ -232,15 +234,43 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
     // Clipboard outcome is only known once the promise settles - never
     // reported as a success before that (bug #4)
-    const result = await injectQuery(kql);
+    const insertMode = getSetting('insertMode');
+    const result = await injectQuery(kql, insertMode);
+    log.debug(`pivot-menu: runRule - injectQuery(mode=${insertMode}) -> ${result}`);
     if (result === 'injected') {
       const timeHint = platform.id === 'defender' ? t('notify.timeSelectorHint') : '';
       showToast(t('notify.ruleInjected', { id: rule.id, hint: timeHint }), 'success');
+    } else if (result === 'newTabUnsupported') {
+      // mode=newTab asked for, honestly not available (single shared Monaco
+      // editor, see editor-bridge.ts) - the query DID land, just appended.
+      const timeHint = platform.id === 'defender' ? t('notify.timeSelectorHint') : '';
+      showToast(t('notify.ruleInjectedNewTabFallback', { id: rule.id, hint: timeHint }), 'info');
     } else if (result === 'clipboard') {
       showToast(t('notify.ruleCopied', { id: rule.id }), 'info');
     } else {
       showToast(t('notify.clipboardDenied'), 'error');
       return;
+    }
+
+    // W2 point 8: register the pivot as a pendingRun so the NEXT captured
+    // QueryRun (if the user, or autoRun below, clicks Run) links back to
+    // this rule and snapshot. Only when the KQL actually reached the editor
+    // ('injected' or the degraded 'newTabUnsupported') - on a clipboard
+    // fallback there is nothing in the editor to run, so registering would
+    // leave a pendingRun that can never be consumed (until its TTL drops it).
+    const landedInEditor = result === 'injected' || result === 'newTabUnsupported';
+    if (landedInEditor && snapshotId) {
+      const kqlHash = await computeKqlHash(kql);
+      registerPendingRun({ ruleId: rule.id, snapshotId, kqlHash });
+    }
+
+    // N1 level 2 "Insérer + Run": runQuery() itself is a no-op unless the
+    // user opted into `autoRun` (project rule 4) - still gated here on
+    // `landedInEditor` so a clipboard fallback never clicks Run on whatever
+    // query happened to be in the editor before this pivot.
+    if (landedInEditor) {
+      const runOutcome = platform.runQuery();
+      log.debug(`pivot-menu: runRule - platform.runQuery() -> ${runOutcome}`);
     }
 
     if (snapshotId) addStep(snapshotId, { ruleId: rule.id, value: normalizedValue, indicator: selected });
@@ -397,7 +427,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       fill(latest);
     } else {
       snapshotId = null;
-      fill({ value: '', column: '', t0: '', t0Raw: '', host: '', row: {} });
+      fill({ value: '', column: '', t0: '', t0Raw: '', host: '', row: {}, source: 'dom' });
     }
     renderAll();
     open(x, y);

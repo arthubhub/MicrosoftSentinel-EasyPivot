@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import type { InsertMode, InsertOutcome, RunOutcome } from '../types.ts';
 import { log } from './log.ts';
+import { getSetting } from './settings.ts';
 
 /**
  * Get the real page window - Tampermonkey sandboxes `window`, so we need
@@ -160,22 +162,12 @@ export function teardownActiveEditorTracking(): void {
   lastFocusedEditor = null;
 }
 
-/**
- * Inject a KQL query into the Monaco editor.
- * Appends below existing content with \n\n separator.
- * Falls back to clipboard if editor not available. Always a Promise so a
- * clipboard rejection (permission denied, no focus, insecure context) can be
- * reported honestly instead of being assumed to succeed.
- */
-export async function injectQuery(
-  kql: string,
-  queryName?: string,
-): Promise<'injected' | 'clipboard' | 'failed'> {
-  const payload = queryName ? `// ${queryName}\n${kql}` : kql;
+// ── Insert strategies (W2 step 6, #22) ──
+// Both helpers assume `editor` is already a validated, resolved instance
+// (`getActiveEditor()`'s job) - they only decide HOW to put text into it.
 
-  const editor = getActiveEditor();
-  if (!editor) return copyText(payload);
-
+/** `append`: existing behaviour, byte-identical - current content + \n\n + payload, via `setValue`. */
+function applyAppend(editor: any, payload: string): void {
   const currentValue: string = editor.getValue();
   const newValue =
     currentValue.trim().length > 0 ? currentValue + '\n\n' + payload : payload;
@@ -192,6 +184,64 @@ export async function injectQuery(
   }
 
   editor.focus?.();
+}
+
+/** `replace`: through the model's edit stack when possible, so Ctrl+Z works. */
+function applyReplace(editor: any, text: string): void {
+  const model = editor.getModel?.();
+  if (model && typeof model.pushEditOperations === 'function') {
+    model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+  } else {
+    editor.setValue(text);
+  }
+  editor.focus?.();
+}
+
+/**
+ * Inject a KQL query into the Monaco editor (W2 step 6, #22). `mode`
+ * (default `append`, the only path exercised before 4f - kept byte-identical):
+ *  - `append`: adds `payload` below existing content with a `\n\n` separator.
+ *  - `replace`: via `applyReplace` (model edit stack), so Ctrl+Z restores the
+ *    previous content - same path `replaceEditorContent()` below uses.
+ *  - `newTab`: NOT implementable. The step-0 survey found a SINGLE Monaco
+ *    editor shared by every tab on both platforms (switching tab swaps the
+ *    model, not the instance) - there is no "open a new tab" call the editor
+ *    API exposes. Falls back to `append` and reports `'newTabUnsupported'`
+ *    rather than claiming `'injected'`: a mode that silently behaves like
+ *    `append` while claiming to work would be worse than an honest failure.
+ * Falls back to clipboard if no editor is available at all (any mode).
+ * Always a Promise so a clipboard rejection (permission denied, no focus,
+ * insecure context) can be reported honestly instead of being assumed to
+ * succeed (#4).
+ */
+export async function injectQuery(
+  kql: string,
+  mode: InsertMode = 'append',
+  queryName?: string,
+): Promise<InsertOutcome> {
+  const payload = queryName ? `// ${queryName}\n${kql}` : kql;
+
+  const editor = getActiveEditor();
+  if (!editor) {
+    log.debug(`editor-bridge: injectQuery(mode=${mode}) - no editor, falling back to clipboard`);
+    return copyText(payload);
+  }
+
+  if (mode === 'replace') {
+    applyReplace(editor, payload);
+    log.info('editor-bridge: injectQuery - replaced editor content (mode=replace)');
+    return 'injected';
+  }
+
+  // `append` and the degraded `newTab` both land here.
+  applyAppend(editor, payload);
+  if (mode === 'newTab') {
+    log.warn(
+      'editor-bridge: injectQuery - mode=newTab is not implementable (single Monaco editor shared by every tab), appended instead',
+    );
+    return 'newTabUnsupported';
+  }
+  log.info('editor-bridge: injectQuery - appended to editor content (mode=append)');
   return 'injected';
 }
 
@@ -210,15 +260,54 @@ export function getEditorText(): string | null {
 export function replaceEditorContent(text: string): boolean {
   const editor = getActiveEditor();
   if (!editor) return false;
-
-  const model = editor.getModel?.();
-  if (model && typeof model.pushEditOperations === 'function') {
-    model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
-  } else {
-    editor.setValue(text);
-  }
-  editor.focus?.();
+  applyReplace(editor, text);
   return true;
+}
+
+// ── Run (N1 level 2 "Insérer + Run", #22) ──
+
+/**
+ * Click the Run button if present, else dispatch Shift+Enter to the active
+ * editor as a fallback (step-0 survey: "clic par script vérifié ; raccourci
+ * Maj+Entrée" on both platforms). `button` is resolved by the platform
+ * adapter from its own selector (DOM selectors stay in `platforms/*`, see
+ * CLAUDE.md) - this function only decides HOW to trigger it, generically.
+ *
+ * Gated on the `autoRun` setting IN HERE, not only by the caller: project
+ * rule 4 ("pas de requête dans le dos de l'utilisateur") must hold even if
+ * some future caller forgets to check the setting itself.
+ */
+export function runQuery(button: HTMLElement | null): RunOutcome {
+  if (!getSetting('autoRun')) {
+    log.debug('editor-bridge: runQuery - autoRun is off, no-op');
+    return 'disabled';
+  }
+
+  if (button) {
+    button.click();
+    log.info('editor-bridge: runQuery - Run button clicked');
+    return 'clicked';
+  }
+
+  const editor = getActiveEditor();
+  const domNode = typeof editor?.getDomNode === 'function' ? editor.getDomNode() : null;
+  if (!domNode) {
+    log.warn('editor-bridge: runQuery - Run button missing and no editor to send Shift+Enter to');
+    return 'unavailable';
+  }
+
+  const event = new KeyboardEvent('keydown', {
+    key: 'Enter',
+    code: 'Enter',
+    keyCode: 13,
+    which: 13,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  domNode.dispatchEvent(event);
+  log.info('editor-bridge: runQuery - Run button missing, dispatched Shift+Enter fallback to the editor');
+  return 'fallback';
 }
 
 /** Generic clipboard write, also used by the "Copy diagnostics" action (N6) */

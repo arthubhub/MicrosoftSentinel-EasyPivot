@@ -4,6 +4,7 @@ import { getCatalogStatus } from '../../core/rules-catalog.ts';
 import { getIndicatorIds, getIndicatorLabel } from '../../core/pivot.ts';
 import { BUILTIN_TI_PROVIDERS, isValidTiTemplate, type TiProvider } from '../../core/ti-links.ts';
 import { getSetting, setSetting } from '../../core/settings.ts';
+import { estimateStoreBytes, purgeNow } from '../../capture/store.ts';
 import { log } from '../../core/log.ts';
 import { t } from '../../i18n/index.ts';
 import { showToast } from '../notification.ts';
@@ -57,6 +58,62 @@ export function createSettingsView(onTiChange?: () => void): SettingsView {
   const catalogError = el('div', `${P}-status ${P}-status--error`);
   const catalogWarnings = el('div', `${P}-status`);
 
+  // ── Capture storage (N1 "Bouton « Purger maintenant » et indicateur de
+  // taille"). Scoped to "everything" (`estimateStoreBytes('all')`): the
+  // active tenant key is resolved asynchronously elsewhere (core/tenant.ts)
+  // and not available synchronously here - per-tenant purge stays available
+  // from `capture/store.ts`'s own API for a future, more granular UI
+  // (phase 5, once a case bar exists to say which tenant is "current"). The
+  // logic (what to drop, in what order) lives entirely in store.ts; this is
+  // only a button + a status line. ──
+  // ── capture.sanitizeValues: the opt-in mitigation for N1 keeping
+  // summary.topValues (real customer values) for retention.days even when the
+  // row sample is dropped. Masking happens at STORE time in capture/store.ts,
+  // so toggling this affects runs captured from now on, not ones already
+  // stored - said so in the hint text rather than implying a retroactive wipe. ──
+  const sanitizeRow = el('div', `${P}-ti-provider-row`);
+  const sanitizeBox = el('input', `${P}-ti-checkbox`);
+  sanitizeBox.type = 'checkbox';
+  sanitizeBox.checked = getSetting('capture').sanitizeValues;
+  sanitizeBox.addEventListener('change', () => {
+    const capture = getSetting('capture');
+    setSetting('capture', { ...capture, sanitizeValues: sanitizeBox.checked });
+    log.debug('capture: sanitizeValues toggled', { enabled: sanitizeBox.checked });
+    renderPurgeStatus();
+  });
+  const sanitizeLabel = el('label', `${P}-ti-provider-label`);
+  sanitizeLabel.append(sanitizeBox, document.createTextNode(t('settings.sanitize.label')));
+  sanitizeRow.appendChild(sanitizeLabel);
+  const sanitizeHint = el('div', `${P}-status`, t('settings.sanitize.hint'));
+
+  const purgeTitle = el('span', `${P}-field-label`, t('settings.purge.title'));
+  const purgeStatus = el('div', `${P}-status`);
+  const purgeBtn = button(`${P}-btn`, t('settings.purge.button'));
+  const purgeRow = el('div', `${P}-actions`);
+  purgeRow.append(purgeBtn);
+
+  function renderPurgeStatus(): void {
+    const mb = estimateStoreBytes('all') / 1_000_000;
+    purgeStatus.textContent = t('settings.purge.size', { mb: mb.toFixed(2) });
+  }
+  renderPurgeStatus();
+
+  purgeBtn.addEventListener('click', () => {
+    try {
+      const report = purgeNow('all');
+      log.debug('capture/store: manual purge from settings', report);
+      const mb = estimateStoreBytes('all') / 1_000_000;
+      purgeStatus.textContent = t('settings.purge.done', {
+        samples: report.samplesDroppedByAge + report.samplesDroppedByBytes,
+        runs: report.runsDroppedByBytes,
+        mb: mb.toFixed(2),
+      });
+    } catch (err) {
+      log.error('settings: purge now failed', err);
+      renderPurgeStatus();
+    }
+  });
+
   // ── Threat Intel providers (N7, #20) — all disabled by default ──
   const tiTitle = el('span', `${P}-field-label`, t('settings.ti.title'));
   const tiProvidersList = el('div', `${P}-ti-providers`);
@@ -82,6 +139,9 @@ export function createSettingsView(onTiChange?: () => void): SettingsView {
     catalogStatus,
     catalogError,
     catalogWarnings,
+    purgeTitle,
+    purgeStatus,
+    purgeRow, sanitizeRow, sanitizeHint,
     tiTitle,
     tiProvidersList,
     tiAddRow,

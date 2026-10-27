@@ -1,6 +1,6 @@
-import type { MonacoEditorInstance, PlatformAdapter, PlatformHealthProbes } from '../types.ts';
+import type { MonacoEditorInstance, PlatformAdapter, PlatformHealthProbes, RunOutcome } from '../types.ts';
 import { SELECTORS } from '../config.ts';
-import { getMonacoEditorCount, getMonacoEditorInstance } from '../core/editor-bridge.ts';
+import { getActiveEditor, getMonacoEditorCount, runQuery as triggerRun } from '../core/editor-bridge.ts';
 import { cellMenuProbe, createResultsGridProbe, editorCountProbe, landmarkProbe } from '../core/health.ts';
 import {
   addFluentMenuItem,
@@ -51,11 +51,18 @@ export const defenderAdapter: PlatformAdapter = {
   },
 
   getMonacoEditor(): MonacoEditorInstance | null {
-    return getMonacoEditorInstance();
+    // 4f fix: this used to call getMonacoEditorInstance() (= getEditors()[0])
+    // and nobody called it, so the trap left by 1f went unnoticed. Delegates
+    // to getActiveEditor() now - the same resolution injectQuery() uses.
+    return getActiveEditor();
   },
 
   isHuntingPage(): boolean {
     return document.querySelector(SELECTORS.DEFENDER.RUN_BUTTON) !== null;
+  },
+
+  runQuery(): RunOutcome {
+    return triggerRun(document.querySelector<HTMLElement>(D.RUN_BUTTON));
   },
 
   readCellContext: readFluentCellContext,

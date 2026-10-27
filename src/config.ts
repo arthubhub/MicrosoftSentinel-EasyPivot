@@ -13,6 +13,15 @@ export const STORAGE_KEYS = {
   SETTINGS: 'shq_settings',
   /** Last launched rule ids, newest first (#17, see core/recent-rules.ts) */
   RECENT_RULES: 'shq_recent_rules',
+  /**
+   * `QueryRun[]` per tenant, prefix + tenantKey (e.g. `shq_runs_sentinel:ab12…`).
+   * Provisional until phase 5 moves runs into `shq_case_<id>` (see Annexes).
+   */
+  RUNS_PREFIX: 'shq_runs_',
+  /** `TenantKey[]` of every tenant that has a `shq_runs_<tenantKey>` entry -
+   * `GM_listValues` is not declared (see core/storage.ts), so store.ts keeps
+   * its own index to purge/size "everything" without it. */
+  RUNS_INDEX: 'shq_runs_index',
 } as const;
 
 // ── Pivot rules catalog ──
@@ -97,3 +106,17 @@ export const PIVOT = {
 
 // ── Notification duration ──
 export const NOTIFICATION_DURATION_MS = 3000;
+
+// ── Capture store (N1, phase 4c) ──
+export const CAPTURE_STORE = {
+  /** Circular buffer size per tenant key (N1 "tampon circulaire … 50 derniers") */
+  MAX_RUNS_PER_TENANT: 50,
+  /** `QueryRun.kqlPreview` length */
+  KQL_PREVIEW_CHARS: 300,
+  /** Sample cell truncation (N1 "cellules tronquées à 2 000 caractères") */
+  MAX_SAMPLE_CELL_CHARS: 2000,
+  /** How long a W2 `pendingRun` stays eligible for matching before it is dropped as stale */
+  PENDING_RUN_TTL_MS: 10 * 60 * 1000,
+  /** Purge cadence (N1 "une fois par heure") */
+  RETENTION_PURGE_INTERVAL_MS: 60 * 60 * 1000,
+} as const;
