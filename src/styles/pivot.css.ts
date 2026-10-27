@@ -23,7 +23,7 @@ export const pivotStyles = `
     left: 0;
     width: 550px;
     max-width: calc(100vw - 16px);
-    max-height: min(800pw, calc(100vh - 16px));
+    max-height: min(800px, calc(100vh - 16px));
     background: var(--colorContainerBackgroudFloating, #fff);
     border: 1px solid var(--colorContainerBorderPrimary, #e1dfdd);
     border-radius: 4px;
