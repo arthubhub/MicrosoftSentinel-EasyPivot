@@ -21,9 +21,9 @@ export const pivotStyles = `
     position: fixed;
     top: 0;
     left: 0;
-    width: 460px;
+    width: 550px;
     max-width: calc(100vw - 16px);
-    max-height: min(560px, calc(100vh - 16px));
+    max-height: min(800pw, calc(100vh - 16px));
     background: var(--colorContainerBackgroudFloating, #fff);
     border: 1px solid var(--colorContainerBorderPrimary, #e1dfdd);
     border-radius: 4px;
