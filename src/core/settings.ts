@@ -74,7 +74,7 @@ export interface Settings {
    * that no profile matched, which `enabled` alone deliberately does not
    * (N1: "aucun profil ne correspond -> rien n'est fait, coût négligeable").
    * `maxRowsSample` (default 200) and `keepSampleForManual` (default
-   * `false`) are `capture/store.ts`'s retention knobs (N1 "Rétention et
+   * `true` since U4: the report shows an excerpt of every query) are `capture/store.ts`'s retention knobs (N1 "Rétention et
    * masquage") - a run with no link to a pivot keeps only its summary and
    * columns unless this is `true` or the user pins the result (phase 5).
    */
@@ -98,6 +98,13 @@ export interface Settings {
    * export is "masqué par défaut" and this is the setting that enforces it.
    */
   readonly report: { readonly redact: boolean };
+  /**
+   * Background context queries (#27, level 3). OFF by default (project rule 4):
+   * when on, the last querying request of the page is kept IN MEMORY (URL,
+   * header values, body - never stored, never logged) so EasyPivot can replay
+   * it with a rule's KQL without touching the editor. See capture/interceptor.ts.
+   */
+  readonly background: { readonly enabled: boolean };
 }
 
 /** Default of `retention.closedDays`; `capture/store.ts` falls back to it when the stored value is not a usable number. */
@@ -111,8 +118,9 @@ const DEFAULTS: Settings = {
   logLevel: 'debug',
   retention: { maxBytes: 20_000_000, days: 30, closedDays: DEFAULT_CLOSED_DAYS },
   ti: { providers: [], custom: [] },
-  capture: { enabled: true, debug: false, maxRowsSample: 200, keepSampleForManual: false, sanitizeValues: false },
+  capture: { enabled: true, debug: false, maxRowsSample: 200, keepSampleForManual: true, sanitizeValues: false },
   report: { redact: true },
+  background: { enabled: false },
 };
 
 /**

@@ -21,9 +21,9 @@ export const pivotStyles = `
     position: fixed;
     top: 0;
     left: 0;
-    width: 550px;
+    width: 720px;
     max-width: calc(100vw - 16px);
-    max-height: min(800px, calc(100vh - 16px));
+    max-height: min(1000px, calc(100vh - 16px));
     background: var(--colorContainerBackgroudFloating, #fff);
     border: 1px solid var(--colorContainerBorderPrimary, #e1dfdd);
     border-radius: 4px;
@@ -31,9 +31,13 @@ export const pivotStyles = `
     z-index: 1000000;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    /* The whole panel scrolls (U5): no block is ever clipped, the header stays on top */
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
     font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--colorTextPrimary, #292827);
     animation: ${CSS_PREFIX}-popup-in 0.15s ease-out;
     box-sizing: border-box;
@@ -59,10 +63,13 @@ export const pivotStyles = `
     background: var(--colorContainerBackgroundSecondary, #f3f2f1);
     border-bottom: 1px solid var(--colorDividerPrimary, #f3f2f1);
     flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 2;
   }
 
   .${P}-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
   }
 
@@ -76,7 +83,7 @@ export const pivotStyles = `
   .${P}-health-btn {
     width: 24px !important;
     height: 24px !important;
-    font-size: 14px !important;
+    font-size: 15px !important;
   }
 
   .${P}-settings-btn--open,
@@ -139,7 +146,7 @@ export const pivotStyles = `
     display: flex;
     align-items: baseline;
     gap: 6px;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.4;
   }
 
@@ -194,7 +201,7 @@ export const pivotStyles = `
   }
 
   .${P}-field-label {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--colorTextSecondary, #646464);
   }
@@ -208,7 +215,7 @@ export const pivotStyles = `
     border-radius: 2px;
     color: var(--colorTextPrimary, #292827);
     font-family: Consolas, Monaco, 'Courier New', monospace;
-    font-size: 12px;
+    font-size: 13px;
     outline: none;
     box-sizing: border-box;
   }
@@ -243,7 +250,7 @@ export const pivotStyles = `
     background: var(--colorButtonBackgroundSecondary, #fff);
     color: var(--colorTextPrimary, #292827);
     font-family: inherit;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -270,13 +277,158 @@ export const pivotStyles = `
   }
 
   .${P}-status {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--colorTextSecondary, #646464);
     word-break: break-all;
   }
 
   .${P}-status--error {
     color: var(--colorIconError, #a4262c);
+  }
+
+  /* ── Background context query (#27) ── */
+
+  .${P}-background {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--colorDividerSecondary, #edebe9);
+    border-left: 3px solid #0078d4;
+  }
+
+  .${P}-background-rule { flex: 1; min-width: 0; font-weight: 600; }
+
+  .${P}-background-table { overflow-x: auto; max-height: 220px; overflow-y: auto; }
+  .${P}-background-table table { border-collapse: collapse; font-size: 12px; }
+  .${P}-background-table th, .${P}-background-table td {
+    border: 1px solid var(--colorDividerSecondary, #edebe9);
+    padding: 2px 6px;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .${P}-bg-btn { width: 24px !important; height: 24px !important; }
+
+  /* ── Playbook bar (N4, #32) ── */
+
+  .${P}-playbook {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--colorDividerSecondary, #edebe9);
+    border-left: 3px solid #8764b8;
+  }
+
+  .${P}-playbook-head { align-items: center; }
+  .${P}-playbook-name { font-weight: 600; flex: 1; min-width: 0; }
+  .${P}-playbook-rule { flex: 1; min-width: 0; }
+  .${P}-playbook-select { flex: 1; min-width: 0; }
+
+  .${P}-playbook-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .${P}-playbook-dot {
+    font: 11px/1.4 Consolas, "Courier New", monospace;
+    padding: 1px 6px;
+    border-radius: 9px;
+    border: 1px solid var(--colorDividerPrimary, #c8c6c4);
+    color: var(--colorTextSecondary, #646464);
+  }
+
+  .${P}-playbook-dot--done { background: #dff6dd; color: #107c10; border-color: #107c10; }
+  .${P}-playbook-dot--skipped { text-decoration: line-through; }
+  .${P}-playbook-dot--current { border-color: #8764b8; color: #8764b8; font-weight: 700; }
+
+  /* ── Coverage gaps of a discovery result (#33) ── */
+
+  .${P}-coverage {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--colorDividerSecondary, #edebe9);
+  }
+
+  .${P}-coverage-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .${P}-coverage-name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+  }
+
+  .${P}-coverage-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    border-left: 3px solid var(--colorTextBrand, #0078d4);
+    background: var(--colorContainerBackgroundSecondary, #f3f2f1);
+  }
+
+  .${P}-coverage-title {
+    font-weight: 600;
+  }
+
+  .${P}-coverage-fields {
+    margin: 0;
+    padding-left: 18px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+  }
+
+  a.${P}-btn {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+  }
+
+  /* ── Values of the last result (U3) ── */
+
+  .${P}-result-values {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+
+  .${P}-result-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .${P}-result-type {
+    min-width: 84px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--colorTextSecondary, #646464);
+  }
+
+  /* ── "Pivot to" filter (U3) ── */
+
+  .${P}-targets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .${P}-targets .${P}-field-label {
+    margin-right: 4px;
   }
 
   /* ── Time window presets (#19) ── */
@@ -291,7 +443,7 @@ export const pivotStyles = `
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    max-height: 64px;
+    max-height: 120px;
     overflow-y: auto;
   }
 
@@ -312,7 +464,7 @@ export const pivotStyles = `
   }
 
   .${P}-steps {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--colorTextSecondary, #646464);
     line-height: 1.4;
   }
@@ -340,14 +492,12 @@ export const pivotStyles = `
     vertical-align: middle;
   }
 
-  /* ── Rules block: fixed search box + the only scrolling area (#17) ── */
+  /* ── Rules block: grows with its content, the panel itself scrolls (U5) ── */
 
   .${P}-rules {
-    flex: 1;
-    min-height: 0;
+    flex: none;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
   }
 
   .${P}-search-wrap {
@@ -361,17 +511,12 @@ export const pivotStyles = `
   }
 
   .${P}-list {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
+    flex: none;
   }
 
   .${P}-section-title {
-    position: sticky;
-    top: 0;
-    z-index: 1;
     padding: 4px 14px;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -396,6 +541,8 @@ export const pivotStyles = `
   }
 
   .${P}-rule-row {
+    /* keyboard highlight scrolled into view stays clear of the sticky header */
+    scroll-margin-top: 48px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -432,14 +579,14 @@ export const pivotStyles = `
   }
 
   .${P}-rule-meta {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--colorTextSecondary, #646464);
     margin-top: 1px;
   }
 
   .${P}-rule-details {
     padding: 0 14px 8px;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.4;
   }
 
@@ -486,7 +633,7 @@ export const pivotStyles = `
     border-radius: 2px;
     background: var(--colorButtonBackgroundSecondary, #fff);
     color: var(--colorTextPrimary, #292827);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     text-decoration: none;
     white-space: nowrap;
@@ -510,7 +657,7 @@ export const pivotStyles = `
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .${P}-ti-custom-row {
@@ -525,7 +672,7 @@ export const pivotStyles = `
     gap: 3px;
     padding: 6px 0;
     border-top: 1px solid var(--colorDividerPrimary, #f3f2f1);
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .${P}-cases-name {

@@ -1,4 +1,5 @@
 import type { CellContext, IndicatorId, PivotSnapshot } from '../../types.ts';
+import type { ResultValue } from '../../core/result-values.ts';
 import { detectForCell } from '../../core/detection.ts';
 import { getIndicatorLabel } from '../../core/pivot.ts';
 import { CSS_PREFIX } from '../../config.ts';
@@ -53,6 +54,11 @@ export interface ContextView {
     value: string,
     onFieldChipClick: (value: string, indicator: IndicatorId) => void,
   ): void;
+  /** U3: indicator values of the last captured result, grouped by type; empty map hides the block */
+  renderResultValues(
+    values: ReadonlyMap<IndicatorId, readonly ResultValue[]>,
+    onPick: (value: ResultValue, indicator: IndicatorId) => void,
+  ): void;
 }
 
 export function createContextView(): ContextView {
@@ -72,7 +78,13 @@ export function createContextView(): ContextView {
   const pinBtn = button(`${P}-btn ${P}-pin`, t('panel.context.pinRow'), t('panel.context.pinRowHint'));
   const pinInfo = el('span', `${P}-status ${P}-pin-info`);
   pinRow.append(pinBtn, pinInfo);
-  context.append(contextRow, fieldsLabel, fields, steps, pinRow);
+  // U3: values of the last captured result, to pivot on without hunting for the cell
+  const resultLabel = el('span', `${P}-field-label`, t('panel.context.resultValuesLabel'));
+  resultLabel.title = t('panel.context.resultValuesHint');
+  const resultValues = el('div', `${P}-result-values`);
+  resultLabel.hidden = true;
+  resultValues.hidden = true;
+  context.append(contextRow, fieldsLabel, fields, resultLabel, resultValues, steps, pinRow);
 
   function renderContext(
     snapshots: readonly PivotSnapshot[],
@@ -173,5 +185,28 @@ export function createContextView(): ContextView {
     fields.hidden = count === 0;
   }
 
-  return { root: context, historySelect, restoreBtn, pinBtn, renderContext, renderFields };
+  function renderResultValues(
+    values: ReadonlyMap<IndicatorId, readonly ResultValue[]>,
+    onPick: (value: ResultValue, indicator: IndicatorId) => void,
+  ): void {
+    resultValues.replaceChildren();
+    for (const [type, list] of values) {
+      const group = el('div', `${P}-result-group`);
+      group.appendChild(el('span', `${P}-result-type`, getIndicatorLabel(type)));
+      for (const v of list) {
+        const chip = button(
+          `${CSS_PREFIX}-category-chip ${P}-field-chip ${P}-result-chip`,
+          `${short(v.value, 36)} · ${v.count}`,
+          t('panel.context.resultValueTitle', { value: v.value, column: v.column, n: v.count }),
+        );
+        chip.addEventListener('click', () => onPick(v, type));
+        group.appendChild(chip);
+      }
+      resultValues.appendChild(group);
+    }
+    resultLabel.hidden = values.size === 0;
+    resultValues.hidden = values.size === 0;
+  }
+
+  return { root: context, historySelect, restoreBtn, pinBtn, renderContext, renderFields, renderResultValues };
 }

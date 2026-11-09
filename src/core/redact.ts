@@ -676,3 +676,34 @@ export function redactKqlStringLiterals(kql: string, options?: { readonly commen
     return kql.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1?/g, (_m, q: string) => `${q}${OPAQUE}${q}`);
   }
 }
+
+// ── Results excerpts (U4) ──
+//
+// A report excerpt of a query result is masked column by column. ALLOWLIST:
+// only columns that describe WHAT happened (table, operation, app, country,
+// result code, counters, dates) keep their text, and even those go through the
+// token masker (known values of the case + recognisable shapes: IP, e-mail,
+// GUID, SID...). Every other column - accounts, machines, IPs, paths, command
+// lines, free-text "Evidence" - is masked whole (`redactUnknown`), as pinned rows are.
+const CONTEXT_COLUMNS = new Set([
+  '$table', 'table', 'tables', 'sourcetable', 'source', 'sources', 'type', 'category', 'categories',
+  'operationname', 'operation', 'operations', 'actiontype', 'activitydisplayname', 'activitytype', 'action',
+  'appdisplayname', 'apps', 'application', 'applications', 'resourcedisplayname', 'clientappused', 'useragentfamily',
+  'resulttype', 'resultdescription', 'resultsignature', 'result', 'results', 'status', 'statuses',
+  'conditionalaccessstatus', 'authenticationrequirement', 'mfadetail', 'logontype', 'logonresult', 'failurereason',
+  'location', 'locations', 'country', 'countries', 'countryorregion', 'city', 'state',
+  'protocol', 'protocols', 'port', 'ports', 'remoteport', 'localport', 'direction',
+  'eventid', 'eventids', 'events', 'count', 'count_', 'hits', 'total', 'distinct', 'rows',
+  'severity', 'alertseverity', 'title', 'alertname', 'alerttitle', 'tactics', 'techniques', 'detectionsource',
+  'risklevelduringsignin', 'risklevelaggregated', 'riskstate', 'riskeventtype', 'riskdetail',
+  'deliveryaction', 'deliverylocation', 'threattypes', 'detectionmethods', 'emaildirection',
+  'iprole', 'machinerole', 'role', 'roles', 'confidence', 'confidencerank',
+  'day', 'hour', 'bin', 'timegenerated', 'timestamp', 'firstseen', 'lastseen', 'starttime', 'endtime',
+]);
+
+const INERT_TYPES = /^(long|int|int32|int64|real|double|decimal|bool|boolean|sbyte|datetime|timespan)$/i;
+
+/** Whether a result column keeps its (token-masked) text in a masked report excerpt. */
+export function isContextColumn(name: string, type?: string): boolean {
+  return CONTEXT_COLUMNS.has(name.trim().toLowerCase()) || (type !== undefined && INERT_TYPES.test(type.trim()));
+}

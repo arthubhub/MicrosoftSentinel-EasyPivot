@@ -105,6 +105,8 @@ export interface PivotRule {
   readonly category: string;
   readonly indicators: readonly IndicatorId[];
   readonly action: PivotActionId;
+  /** Indicator types the rule's result shows (cross pivots, U3): IP → device, account → IP... */
+  readonly targets?: readonly IndicatorId[];
   readonly description: string;
   readonly reading?: { readonly decisive?: string; readonly context?: string; readonly noise?: string };
   readonly v1?: boolean;
@@ -138,8 +140,18 @@ export interface PivotCatalog {
    * the uncertain tier (column-name pattern). Read by `core/detection.ts`.
    */
   readonly locationsConfirmed?: Readonly<Partial<Record<IndicatorId, number>>>;
-  /** Typed in phase 6 (N4); opaque for now */
-  readonly scenarios?: readonly unknown[];
+  /** Guided playbooks (N4, #32), see core/playbooks.ts */
+  readonly scenarios?: readonly Scenario[];
+}
+
+/** A guided playbook published by the rules repo (`scenarios/<id>.yml`) */
+export interface Scenario {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly indicator: IndicatorId;
+  /** `carry`: type of value taken from this step's result for the next step */
+  readonly steps: readonly { readonly ruleId: string; readonly carry?: IndicatorId }[];
 }
 
 /** What the user right-clicked in the results grid */

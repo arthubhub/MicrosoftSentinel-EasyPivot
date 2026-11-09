@@ -30,7 +30,7 @@ import { P, el, button, downloadJson } from './panel/shared.ts';
 
 const V = `${CSS_PREFIX}-case-view`;
 /** Matches `width` in styles/case-view.css.ts; `ui/pivot-menu.ts` keeps the Pivot panel clear of it. */
-export const CASE_VIEW_WIDTH = 420;
+export const CASE_VIEW_WIDTH = 520;
 /** Deeper levels keep the same indent so a long chain does not push the labels off-screen. */
 const MAX_INDENT_DEPTH = 8;
 

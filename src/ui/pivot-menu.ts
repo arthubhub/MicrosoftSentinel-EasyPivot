@@ -8,7 +8,7 @@ import type {
 } from '../types.ts';
 import { CASES, CSS_PREFIX } from '../config.ts';
 import { detectForCell } from '../core/detection.ts';
-import { fillQuery, parseDurationMinutes, parseGridTime } from '../core/pivot.ts';
+import { fillQuery, getRuleById, parseDurationMinutes, parseGridTime } from '../core/pivot.ts';
 import { normalize } from '../core/normalize.ts';
 import { getRulesUrl, onCatalogChange, reloadCatalog, setRulesUrl } from '../core/rules-catalog.ts';
 import { getSetting, resolvePlatformVariant } from '../core/settings.ts';
@@ -16,6 +16,9 @@ import { getEditorText, injectQuery, replaceEditorContent } from '../core/editor
 import { copyDiagnostics, getHealthReport, onHealthChange, refreshHealth } from '../core/health.ts';
 import { listRecentRuleIds, recordRecentRule } from '../core/recent-rules.ts';
 import { computeKqlHash, registerPendingRun } from '../capture/store.ts';
+import { getLastCapture, replayAvailability, replayQuery } from '../capture/interceptor.ts';
+import { backgroundReason, createBackgroundView } from './panel/background-view.ts';
+import { extractResultValues, type ResultValue } from '../core/result-values.ts';
 import {
   addStepToSnapshot,
   checkPivotAllowed,
@@ -37,6 +40,9 @@ import { createHealthView } from './panel/health-view.ts';
 import { createContextView } from './panel/context-view.ts';
 import { createParamsView } from './panel/params-view.ts';
 import { createRulesView } from './panel/rules-view.ts';
+import { createCoverageView } from './panel/coverage-view.ts';
+import { createPlaybookBar } from './panel/playbook-view.ts';
+import { advancePlaybook, carrySuggestions, listScenarios, onRuleRan, startPlaybook, stopPlaybook, viewPlaybook } from '../core/playbooks.ts';
 
 export interface PivotMenuComponent {
   /** Open on a grid cell context (new event) */
@@ -115,8 +121,13 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       // "Événement" selector lists ITS snapshots, so repaint it, and forget a
       // selected snapshot that belongs to the previous case.
       if (snapshotId && !currentSnapshot()) snapshotId = null;
-      if (visible) renderContext();
+      if (visible) {
+        renderContext();
+        renderPlaybook();
+      }
       caseView.refresh();
+      // U1: a case created/switched while the panel shows a pending event takes that event too
+      if (visible && pendingCtx) void journalOnOpen(pendingCtx);
     },
     onOpenCaseView: () => {
       if (caseView.isVisible()) caseView.hide();
@@ -129,6 +140,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   // imported case changes which case is active, so the bar must re-resolve.
   const settingsView = createSettingsView({
     onTiChange: () => renderTypes(),
+    onBackgroundChange: () => renderRules(),
     getCurrentKey: () => caseBarView.getCurrentKey(),
     onCasesChanged: () => void caseBarView.refresh(),
   });
@@ -136,6 +148,9 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   const contextView = createContextView();
   const paramsView = createParamsView();
   const rulesView = createRulesView();
+  const coverageView = createCoverageView();
+  const playbookBar = createPlaybookBar();
+  const backgroundView = createBackgroundView();
 
   panel.append(
     header,
@@ -143,7 +158,10 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     settingsView.root,
     healthView.root,
     contextView.root,
+    coverageView.root,
     paramsView.root,
+    playbookBar.root,
+    backgroundView.root,
     rulesView.root,
   );
 
@@ -184,7 +202,8 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       paramsView.valueField.input.value.trim(),
       resolvePlatformVariant(platform.id),
       recentRuleIds,
-      runRule,
+      (rule) => void runRule(rule),
+      getSetting('background').enabled ? (rule) => void runRule(rule, 'background') : undefined,
     );
   }
 
@@ -204,6 +223,46 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     contextView.renderFields(row, paramsView.valueField.input.value, onFieldChipClick);
   }
 
+  /** U3: values of the last captured result (in memory, raw), computed once per panel open */
+  function renderResultValues(): void {
+    const last = getLastCapture(platform.id);
+    const values = last
+      ? extractResultValues(last.columns, last.rows, {
+          sourceTables: last.sourceTables,
+          exclude: [paramsView.valueField.input.value],
+        })
+      : new Map();
+    contextView.renderResultValues(values, (v, type) => onResultValuePick(v, type, last?.runId));
+    // #33: a discovery (*-S9) result lists the locations the rules do not read
+    // The type is the discovery rule's (IP-S9 -> ip), read from the stored run; else the panel's type
+    const discoveryType = last?.ruleId ? getRuleById(last.ruleId)?.indicators[0] : undefined;
+    coverageView.render(last, discoveryType ?? selected, platform.id);
+  }
+
+  /**
+   * A value picked from the last result becomes a new event, child of the pivot
+   * that produced that result (`resolveParentLink` via `runId`), and enters the
+   * history right away (U1). T0 is kept: the analyst stays in the same window.
+   */
+  function onResultValuePick(v: ResultValue, type: IndicatorId, runId: string | undefined): void {
+    const ctx: CellContext = {
+      value: v.value,
+      column: v.column,
+      t0: paramsView.t0Field.input.value.trim(),
+      t0Raw: '',
+      host: '',
+      row: {},
+      source: runId ? 'capture' : 'dom',
+      ...(runId ? { runId } : {}),
+    };
+    pendingCtx = ctx;
+    snapshotId = null;
+    fill(ctx);
+    selected = type;
+    renderAll();
+    void journalOnOpen(ctx);
+  }
+
   function onFieldChipClick(val: string, indicator: IndicatorId): void {
     paramsView.valueField.input.value = val;
     selected = indicator;
@@ -214,9 +273,45 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     settingsView.renderStatus();
   }
 
+  /** N4: the case's guided playbook (or "Start a playbook" for the selected type) */
+  function renderPlaybook(): void {
+    const c = activeCase();
+    const model = viewPlaybook(c?.id);
+    playbookBar.render({
+      model,
+      available: listScenarios(selected),
+      suggestions: c && model?.carry ? carrySuggestions(c.id, getLastCapture(platform.id)) : [],
+      caseWritable: !!c && c.closedAt === undefined,
+      onStart: (id) => {
+        if (c && startPlaybook(c.id, id)) {
+          const first = viewPlaybook(c.id);
+          if (first) selected = first.type;
+          renderAll();
+        }
+      },
+      onRun: (rule) => {
+        const m = viewPlaybook(c?.id);
+        if (m) selected = m.type;
+        void runRule(rule);
+      },
+      onSkip: () => {
+        if (c) advancePlaybook(c.id);
+        const m = viewPlaybook(c?.id);
+        if (m) selected = m.type;
+        renderAll();
+      },
+      onStop: () => {
+        if (c) stopPlaybook(c.id);
+        renderAll();
+      },
+      onPickValue: (v, type) => onResultValuePick(v, type, getLastCapture(platform.id)?.runId),
+    });
+  }
+
   function renderAll(): void {
     renderContext();
     renderTypes();
+    renderPlaybook();
     renderRules();
     if (settingsOpen) renderStatus();
     caseView.refresh();
@@ -251,7 +346,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
 
   // ── Actions ──
 
-  async function runRule(rule: PivotRule): Promise<void> {
+  async function runRule(rule: PivotRule, mode: 'editor' | 'background' = 'editor'): Promise<void> {
     const value = paramsView.valueField.input.value.trim();
     if (!value) {
       showToast(t('notify.emptyValue'), 'error');
@@ -347,6 +442,12 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       pendingCtx = null;
     }
 
+    // #27: run without touching the editor - replay of the page's own request
+    if (mode === 'background') {
+      await runInBackground(rule, kql, normalizedValue, activeCase.id);
+      return;
+    }
+
     // Clipboard outcome is only known once the promise settles - never
     // reported as a success before that (bug #4)
     const insertMode = getSetting('insertMode');
@@ -398,7 +499,41 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     }
     recordRecentRule(rule.id);
     recentRuleIds = listRecentRuleIds();
+    // N4: running the current step's rule (from the bar or the list) moves the playbook on
+    onRuleRan(activeCase.id, rule.id);
     hide();
+  }
+
+  /**
+   * #27 background context query: same snapshot/step/pendingRun as a normal
+   * pivot, so the result is linked and lands in the case and the report; the
+   * panel stays open and shows it. Never touches the editor.
+   */
+  async function runInBackground(rule: PivotRule, kql: string, value: string, caseId: string): Promise<void> {
+    const availability = replayAvailability(platform.id);
+    if (availability !== 'ok') {
+      backgroundView.showError(rule, backgroundReason(availability));
+      return;
+    }
+    backgroundView.showPending(rule);
+    if (snapshotId) {
+      const kqlHash = await computeKqlHash(kql);
+      registerPendingRun({ ruleId: rule.id, snapshotId, kqlHash });
+      const stepResult = addStepToSnapshot(caseId, snapshotId, { ruleId: rule.id, value, indicator: selected });
+      if (!stepResult.ok) log.warn('pivot-menu: background step not recorded', { reason: stepResult.reason });
+    }
+    const res = await replayQuery(platform.id, kql);
+    if (!res.ok) {
+      backgroundView.showError(rule, backgroundReason(res.reason, res.status));
+      return;
+    }
+    recordRecentRule(rule.id);
+    onRuleRan(caseId, rule.id);
+    const r = res.outcome.result;
+    const values = r && !r.error ? extractResultValues(r.columns, r.rows, { sourceTables: r.sourceTables, exclude: [value] }) : new Map();
+    backgroundView.showResult(rule, res.outcome, values, (v, type) => onResultValuePick(v, type, res.outcome.id));
+    caseView.refresh();
+    renderPlaybook();
   }
 
   function restoreSource(): void {
@@ -544,6 +679,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
     }
     position(x, y);
     rulesView.resetView();
+    panel.scrollTop = 0; // the panel is the scroll container (U5)
     // Quietly re-resolve on every open (a case/client may have changed in
     // another tab, or in Settings since this panel was last shown) - the
     // bar keeps showing its last known state while this runs, see
@@ -558,12 +694,46 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
   }
 
   function show(ctx: CellContext, x: number, y: number): void {
+    backgroundView.root.hidden = true;
     pendingCtx = ctx;
     snapshotId = null;
     loadRecentRules();
     fill(ctx);
     renderAll();
+    renderResultValues();
     open(x, y);
+    void journalOnOpen(ctx);
+  }
+
+  /**
+   * U1: the right-clicked event enters the case history as soon as the panel
+   * opens on it, without running a rule. Only when a pivot would be allowed
+   * right now (resolved key, open case covering it): otherwise `pendingCtx`
+   * stays and `runRule` records it on the first pivot, as before. Opening the
+   * panel never creates a case (not even the unassigned one).
+   * Same editor text as `runRule` uses, read before anything is injected, so
+   * `sameEvent` dedups a later pivot on the same cell.
+   */
+  async function journalOnOpen(ctx: CellContext): Promise<void> {
+    try {
+      const sourceQuery = getEditorText() ?? '';
+      await caseBarView.ensureResolved();
+      // The user may have right-clicked another cell or picked a snapshot meanwhile
+      if (pendingCtx !== ctx || !visible) return;
+      const key = caseBarView.getCurrentKey();
+      const target = key !== undefined ? getActiveCaseForKey(key) : undefined;
+      if (key === undefined || !target || target.closedAt !== undefined) return;
+      if (!checkPivotAllowed(target, key).allowed) return;
+      const recorded = recordSnapshotInCase(target.id, ctx, sourceQuery, platform.id);
+      if (!recorded.ok || pendingCtx !== ctx) return;
+      snapshotId = recorded.snapshot.id;
+      pendingCtx = null;
+      renderContext();
+      caseView.refresh();
+    } catch (err) {
+      // Never block the panel: the first pivot will record the event instead
+      log.warn('pivot-menu: journal on open failed', err);
+    }
   }
 
   function showHistory(x: number, y: number): void {
@@ -578,6 +748,7 @@ export function createPivotMenu(platform: PlatformAdapter): PivotMenuComponent {
       fill({ value: '', column: '', t0: '', t0Raw: '', host: '', row: {}, source: 'dom' });
     }
     renderAll();
+    renderResultValues();
     open(x, y);
     if (!latest) paramsView.valueField.input.focus();
   }

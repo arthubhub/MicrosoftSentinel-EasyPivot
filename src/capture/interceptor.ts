@@ -11,7 +11,10 @@ import { addRun, newRunId, startRetentionScheduler } from './store.ts';
  * Defender: it only asks each registered CaptureProfile "is this a query
  * execution?" and, if one says yes, defers parsing so a multi-MB response
  * never blocks the grid. Garde-fous (N1), all enforced here:
- *   - never reads a header VALUE, only names (project rule 3);
+ *   - never reads a header VALUE, only names (project rule 3) - EXCEPT, when
+ *     the opt-in `background.enabled` setting is on (#27), the headers of a
+ *     MATCHED querying request, kept in memory only (`replayTemplates`) to
+ *     replay that request with another KQL; never stored, logged or exported;
  *   - never mutates the request or the response it observes;
  *   - every hook is wrapped so a throw can never reach the page;
  *   - `capture.enabled = false` means the patch is not installed at all.
@@ -24,6 +27,8 @@ import { addRun, newRunId, startRetentionScheduler } from './store.ts';
 interface CaptureInfo {
   method: string;
   url: string;
+  /** #27 only (background.enabled): header values set on this XHR, in memory */
+  headers?: Record<string, string>;
 }
 
 interface CapturedXhr extends XMLHttpRequest {
@@ -113,7 +118,7 @@ function notifyCaptureListeners(): void {
 //
 // W2 step 2 (#14) reads the DOM-clicked row from the last captured
 // `QueryRun` first. That can NOT be `capture/store.ts`'s persisted store:
-//   - `capture.keepSampleForManual` defaults to FALSE, so a manually-run
+//   - `capture.keepSampleForManual` can be FALSE (opt-out), so a manually-run
 //     query (the common right-click case) keeps NO `rowsSample` at all in
 //     storage - tier 1 would almost never find anything with default
 //     settings.
@@ -138,7 +143,11 @@ export interface CapturedRowSet {
   readonly columns: readonly ParsedColumn[];
   readonly rows: readonly (readonly unknown[])[];
   readonly sourceTables: readonly string[];
+  /** `// [RULE-ID]` header of the query, when EasyPivot wrote it (#33: a discovery result's type) */
+  readonly ruleId?: string;
 }
+
+const RULE_ID_HEADER = /^\/\/ \[([A-Za-z0-9_-]+)\]/;
 
 const lastCapture = new Map<PlatformId, CapturedRowSet>();
 
@@ -149,18 +158,22 @@ export function getLastCapture(platform: PlatformId): CapturedRowSet | null {
 
 /** Forget every cached result. Call on hunting-page teardown (see header above). */
 export function clearLastCapture(): void {
+  replayTemplates.clear(); // #27: no token outlives the hunting page
   if (lastCapture.size === 0) return;
   lastCapture.clear();
   log.debug('capture: in-memory row cache cleared');
 }
 
-function rememberLastCapture(platform: PlatformId, runId: string, result: ParsedResult): void {
+function rememberLastCapture(platform: PlatformId, runId: string, result: ParsedResult, kql: string | undefined): void {
+  const firstLine = kql?.split('\n').find((l) => l.trim() !== '')?.trim() ?? '';
+  const ruleId = RULE_ID_HEADER.exec(firstLine)?.[1];
   lastCapture.set(platform, {
     runId,
     platform,
     columns: result.columns,
     rows: result.rows,
     sourceTables: result.sourceTables,
+    ...(ruleId ? { ruleId } : {}),
   });
   log.debug('capture: in-memory row cache updated', { platform, runId, rows: result.rows.length });
 }
@@ -246,6 +259,7 @@ export function installCapture(
 
   installed = true;
   profiles = capturedProfiles;
+  resultHandler = onResult;
 
   const w = pageWindow();
   patchXhr(w, onResult);
@@ -285,8 +299,15 @@ function patchXhr(w: any, onResult: CaptureResultHandler): void {
     // would keep a pile of header names alive for every XHR on the page for no
     // benefit. This is the hook point #23 will fill, in memory only, never stored.
     proto.setRequestHeader = toPage(function (this: CapturedXhr, name: string, value: string) {
+      try {
+        const info = this.__shqCapture;
+        if (info && backgroundEnabled()) (info.headers ??= {})[String(name)] = String(value);
+      } catch {
+        /* never let the hook break the real request */
+      }
       return origSetHeader.apply(this, [name, value]);
     });
+    original.xhr = { open: origOpen, send: origSend, setHeader: origSetHeader };
 
     proto.send = toPage(function (this: CapturedXhr, body?: unknown) {
       try {
@@ -321,11 +342,17 @@ function handleXhrSend(xhr: CapturedXhr, info: CaptureInfo, body: unknown, onRes
     return;
   }
   log.debug(`capture: xhr ${info.method} ${url.pathname} matched '${profile.platform}'`);
+  rememberTemplate(profile, 'xhr', req, info.headers ?? {});
 
   xhr.addEventListener('loadend', () => {
     try {
       const receivedAt = Date.now();
       const status = xhr.status;
+      try {
+        rememberRateLimit(profile.platform, xhr.getResponseHeader('x-rate-limit-remaining'));
+      } catch {
+        /* header not exposed */
+      }
       let responseText = '';
       try {
         responseText = typeof xhr.responseText === 'string' ? xhr.responseText : '';
@@ -362,6 +389,7 @@ function patchFetch(w: any, onResult: CaptureResultHandler): void {
       return res;
     };
 
+    original.fetch = origFetch;
     w.fetch = toPage(patched);
     log.debug('capture: fetch patched');
   } catch (err) {
@@ -389,6 +417,7 @@ function handleFetch(
 
   const method = init?.method ?? (input as { method?: string } | undefined)?.method ?? 'GET';
   const parsedBody = safeJsonParse(init?.body);
+  const fetchHeaders = (init as { headers?: unknown } | undefined)?.headers;
   const req: CaptureRequest = { url, method, body: parsedBody };
   const profile = matchProfile(req);
   if (!profile) {
@@ -396,6 +425,12 @@ function handleFetch(
     return;
   }
   log.debug(`capture: fetch ${method} ${url.pathname} matched '${profile.platform}'`);
+  if (backgroundEnabled()) rememberTemplate(profile, 'fetch', req, headersToRecord(fetchHeaders));
+  try {
+    rememberRateLimit(profile.platform, res.headers.get('x-rate-limit-remaining'));
+  } catch {
+    /* no headers */
+  }
 
   const status = res.status;
   // Clone before reading - the real response body must stay untouched for the page.
@@ -404,6 +439,185 @@ function handleFetch(
     .text()
     .then((text) => deferParse(() => processMatch(profile, req, status, text, 'fetch', onResult, sentAt, receivedAt)))
     .catch((err: unknown) => log.error('capture: fetch response read failed', err));
+}
+
+// ── #27: background context queries (opt-in, `background.enabled`) ──
+//
+// The last MATCHED querying request per platform is kept in memory as a
+// template: URL, method, body and the header values the page set (Sentinel's
+// Bearer, Defender's X-XSRF-TOKEN; Defender's session cookies travel by
+// themselves, same-origin). Nothing here is persisted, logged or exported; a
+// reload forgets it, and every query the analyst runs refreshes it (a stale
+// token simply makes the replay fail with 401 until then). The replay goes
+// through the ORIGINAL xhr/fetch (not the patched ones), so it never replaces
+// the grid's row cache nor counts as a user query; its outcome goes to the
+// store like any capture, so it lands in the case and in the report.
+
+interface ReplayTemplate {
+  readonly profile: CaptureProfile;
+  readonly transport: 'xhr' | 'fetch';
+  readonly req: CaptureRequest;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly at: number;
+}
+
+const replayTemplates = new Map<PlatformId, ReplayTemplate>();
+const rateRemaining = new Map<PlatformId, number>();
+const original: {
+  xhr?: { open: (...a: any[]) => any; send: (...a: any[]) => any; setHeader: (...a: any[]) => any };
+  fetch?: (...a: any[]) => Promise<Response>;
+} = {};
+let resultHandler: CaptureResultHandler = defaultOnResult;
+
+/** Defender announces a per-minute budget; a background query is refused below this many left. */
+export const MIN_RATE_REMAINING = 5;
+const REPLAY_TIMEOUT_MS = 120_000;
+/** Headers the browser sets itself (or must not be copied) */
+const SKIP_HEADERS = /^(content-length|host|cookie|connection|accept-encoding|origin|referer|user-agent)$/i;
+
+function backgroundEnabled(): boolean {
+  try {
+    return getSetting('background').enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+function headersToRecord(h: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    if (!h) return out;
+    const iter: Iterable<[string, string]> =
+      typeof (h as Headers).forEach === 'function' && typeof (h as Headers).entries === 'function'
+        ? (h as Headers).entries()
+        : Array.isArray(h)
+          ? (h as [string, string][])
+          : Object.entries(h as Record<string, string>);
+    for (const [k, v] of iter) out[String(k)] = String(v);
+  } catch {
+    /* unreadable headers: no template headers */
+  }
+  return out;
+}
+
+function rememberTemplate(profile: CaptureProfile, transport: 'xhr' | 'fetch', req: CaptureRequest, headers: Record<string, string>): void {
+  if (!backgroundEnabled() || !profile.buildReplay) return;
+  replayTemplates.set(profile.platform, { profile, transport, req, headers: { ...headers }, at: Date.now() });
+  // Names only, never values
+  log.debug('capture: replay template refreshed', { platform: profile.platform, transport, headerCount: Object.keys(headers).length });
+}
+
+function rememberRateLimit(platform: PlatformId, value: string | null): void {
+  if (value === null || value === '') return;
+  const n = Number(value);
+  if (Number.isFinite(n)) rateRemaining.set(platform, n);
+}
+
+export type ReplayAvailability = 'disabled' | 'no-capture' | 'no-template' | 'rate-limited' | 'ok';
+
+export function replayAvailability(platform: PlatformId): ReplayAvailability {
+  if (!backgroundEnabled()) return 'disabled';
+  if (!installed) return 'no-capture';
+  if (!replayTemplates.has(platform)) return 'no-template';
+  const left = rateRemaining.get(platform);
+  if (left !== undefined && left < MIN_RATE_REMAINING) return 'rate-limited';
+  return 'ok';
+}
+
+export type ReplayResult =
+  | { readonly ok: true; readonly outcome: CaptureOutcome }
+  | { readonly ok: false; readonly reason: Exclude<ReplayAvailability, 'ok'> | 'build' | 'network' | 'auth' | 'http' | 'parse'; readonly status?: number; readonly error?: string };
+
+function sendOriginal(t: ReplayTemplate, url: URL, body: string): Promise<{ status: number; text: string; rate: string | null }> {
+  if (t.transport === 'fetch' && original.fetch) {
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(t.headers)) if (!SKIP_HEADERS.test(k)) headers[k] = v;
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), REPLAY_TIMEOUT_MS) : null;
+    return original
+      .fetch.call(pageWindow(), url.href, { method: t.req.method, headers, body, credentials: 'include', ...(ctl ? { signal: ctl.signal } : {}) })
+      .then(async (res: Response) => ({ status: res.status, text: await res.text(), rate: res.headers.get('x-rate-limit-remaining') }))
+      .finally(() => timer && clearTimeout(timer));
+  }
+  return new Promise((resolve, reject) => {
+    const xo = original.xhr;
+    const XHR = pageWindow()?.XMLHttpRequest;
+    if (!xo || !XHR) {
+      reject(new Error('no xhr'));
+      return;
+    }
+    const xhr: XMLHttpRequest = new XHR();
+    xo.open.apply(xhr, [t.req.method, url.href, true]);
+    xhr.withCredentials = true;
+    xhr.timeout = REPLAY_TIMEOUT_MS;
+    for (const [k, v] of Object.entries(t.headers)) if (!SKIP_HEADERS.test(k)) xo.setHeader.apply(xhr, [k, v]);
+    xhr.onload = () => {
+      let rate: string | null = null;
+      try {
+        rate = xhr.getResponseHeader('x-rate-limit-remaining');
+      } catch {
+        /* not exposed */
+      }
+      resolve({ status: xhr.status, text: typeof xhr.responseText === 'string' ? xhr.responseText : '', rate });
+    };
+    xhr.onerror = () => reject(new Error('network'));
+    xhr.ontimeout = () => reject(new Error('timeout'));
+    xo.send.apply(xhr, [body]);
+  });
+}
+
+/**
+ * Run `kql` in the background by replaying the page's last querying request
+ * (#27). The outcome is handed to the store (case, report) like a capture,
+ * and returned so the panel can show it. Never throws.
+ */
+export async function replayQuery(platform: PlatformId, kql: string): Promise<ReplayResult> {
+  const availability = replayAvailability(platform);
+  if (availability !== 'ok') return { ok: false, reason: availability };
+  const t = replayTemplates.get(platform);
+  if (!t?.profile.buildReplay) return { ok: false, reason: 'no-template' };
+  let built: { url: URL; body: unknown } | null = null;
+  try {
+    built = t.profile.buildReplay(t.req, kql);
+  } catch {
+    built = null;
+  }
+  if (!built) return { ok: false, reason: 'build' };
+  const startedAt = Date.now();
+  let res: { status: number; text: string; rate: string | null };
+  try {
+    res = await sendOriginal(t, built.url, JSON.stringify(built.body));
+  } catch (err) {
+    log.warn('capture: background query failed (network)', { platform, error: err instanceof Error ? err.message : 'error' });
+    return { ok: false, reason: 'network' };
+  }
+  rememberRateLimit(platform, res.rate);
+  if (res.status === 401 || res.status === 403) return { ok: false, reason: 'auth', status: res.status };
+  const req: CaptureRequest = { url: built.url, method: t.req.method, body: built.body };
+  let result: ParsedResult | null = null;
+  try {
+    result = t.profile.parseResponse(safeJsonParse(res.text), req);
+  } catch {
+    result = null;
+  }
+  if (!result) return { ok: false, reason: res.status >= 400 ? 'http' : 'parse', status: res.status };
+  let query: CaptureOutcome['query'] = null;
+  try {
+    query = t.profile.extractQuery(req);
+  } catch {
+    query = null;
+  }
+  const outcome: CaptureOutcome = {
+    profile: t.profile, transport: t.transport, status: res.status, query, result, startedAt,
+    durationMs: Math.max(0, Date.now() - startedAt), id: newRunId(),
+  };
+  try {
+    resultHandler(outcome);
+  } catch (err) {
+    log.error('capture: background outcome handler threw', err);
+  }
+  log.info('capture: background query done', { platform, status: res.status, rows: result.rows.length, error: !!result.error });
+  return { ok: true, outcome };
 }
 
 // ── Shared: match, defer, parse ──
@@ -478,7 +692,7 @@ function processMatch(
   const id = newRunId();
   if (result) {
     try {
-      rememberLastCapture(profile.platform, id, result);
+      rememberLastCapture(profile.platform, id, result, query?.kql);
     } catch (err) {
       log.error('capture: failed to update the in-memory row cache', err);
     }

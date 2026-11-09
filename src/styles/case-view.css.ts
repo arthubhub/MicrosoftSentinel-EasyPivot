@@ -9,7 +9,7 @@ export const caseViewStyles = `
     top: 0;
     right: 0;
     bottom: 0;
-    width: 420px;
+    width: 520px;
     max-width: 100vw;
     z-index: 1000001;
     display: flex;
@@ -19,7 +19,7 @@ export const caseViewStyles = `
     border-left: 1px solid var(--colorContainerBorderPrimary, #e1dfdd);
     box-shadow: var(--shadowLevel3, -4px 0 14px rgba(0,0,0,.14));
     font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--colorTextPrimary, #292827);
     animation: ${CSS_PREFIX}-popup-in 0.15s ease-out;
   }
@@ -56,7 +56,7 @@ export const caseViewStyles = `
   .${V}-title {
     flex: 1;
     min-width: 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     overflow-wrap: anywhere;
   }
@@ -94,7 +94,7 @@ export const caseViewStyles = `
   }
 
   .${V}-label {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--colorTextSecondary, #646464);
   }
@@ -130,7 +130,7 @@ export const caseViewStyles = `
     border-radius: 2px;
     color: var(--colorTextPrimary, #292827);
     font-family: inherit;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.4;
   }
 
@@ -141,7 +141,7 @@ export const caseViewStyles = `
 
   .${V}-note-status {
     min-height: 13px;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--colorTextSecondary, #646464);
   }
 
@@ -186,7 +186,7 @@ export const caseViewStyles = `
     border: none;
     background: none;
     color: var(--colorTextSecondary, #646464);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1;
     cursor: pointer;
     display: inline-block;
@@ -206,14 +206,14 @@ export const caseViewStyles = `
     border: none;
     background: none;
     font-family: inherit;
-    font-size: 12px;
+    font-size: 13px;
     color: inherit;
     text-align: left;
     cursor: pointer;
   }
 
   .${V}-node-column {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--colorTextSecondary, #646464);
   }
 
@@ -250,7 +250,7 @@ export const caseViewStyles = `
   .${V}-pivots,
   .${V}-pin-count,
   .${V}-note-icon {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--colorTextSecondary, #646464);
     white-space: nowrap;
   }
@@ -286,13 +286,13 @@ export const caseViewStyles = `
     flex: 1;
     min-width: 0;
     font-family: Consolas, Monaco, 'Courier New', monospace;
-    font-size: 11px;
+    font-size: 12px;
     overflow-wrap: anywhere;
   }
 
   .${V}-unpin {
     width: 18px !important;
     height: 18px !important;
-    font-size: 11px !important;
+    font-size: 12px !important;
   }
 `;

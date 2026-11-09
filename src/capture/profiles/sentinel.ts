@@ -165,9 +165,18 @@ function parseResponseSentinel(body: unknown, req: CaptureRequest): ParsedResult
 
 // ── Profile ──
 
+/** #27: `body.query` replaced; URL `timespan` dropped ("absent quand la plage est définie dans la requête"). */
+function buildReplaySentinel(template: CaptureRequest, kql: string): { url: URL; body: unknown } | null {
+  if (!isRecord(template.body) || typeof template.body.query !== 'string') return null;
+  const url = new URL(template.url.href);
+  url.searchParams.delete('timespan');
+  return { url, body: { ...template.body, query: kql } };
+}
+
 export const sentinelProfile: CaptureProfile = {
   platform: 'sentinel',
   match: matchSentinel,
   extractQuery: extractQuerySentinel,
   parseResponse: parseResponseSentinel,
+  buildReplay: buildReplaySentinel,
 };

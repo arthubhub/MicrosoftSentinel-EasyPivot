@@ -734,6 +734,19 @@ export function setCaseNotes(id: string, notes: string): CaseMutationResult {
   return { ok: true, case: toCase(entry, readBody(id)) };
 }
 
+/** Start, advance or stop (undefined) the case's guided playbook (N4, #32). Refused on a closed case. */
+export function setCasePlaybook(id: string, playbook: Case['playbook'] | undefined): CaseMutationResult {
+  const entry = getCaseIndexEntries().find((c) => c.id === id);
+  if (!entry) return { ok: false, reason: 'not-found' };
+  if (entry.closedAt !== undefined) return { ok: false, reason: 'closed' };
+  mutateBody(id, (body) => {
+    const { playbook: _previous, ...rest } = body;
+    return playbook ? { ...rest, playbook } : rest;
+  });
+  log.info('cases: playbook updated', { caseId: id, active: playbook !== undefined, step: playbook?.step });
+  return { ok: true, case: toCase(entry, readBody(id)) };
+}
+
 /**
  * Replaces the tag list (trimmed, de-duplicated, empties dropped). Added in
  * 5d because `core/case-export.ts`'s import has to RESTORE the tags an

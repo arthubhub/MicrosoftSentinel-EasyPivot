@@ -18,7 +18,7 @@ export default async ({ page }) => {
     await open();
     ok(`[${lang}] view exists`, await page.exists('.shq-case-view'));
     const w = await page.eval(`document.querySelector('.shq-case-view').getBoundingClientRect().width`);
-    ok(`[${lang}] width 420`, w === 420, String(w));
+    ok(`[${lang}] width 520`, w === 520, String(w));
     const depths = await page.eval(`[...document.querySelectorAll('.shq-case-view-node')].map(n=>n.dataset.depth).join(',')`);
     console.log('depths in DOM order:', depths);
     ok(`[${lang}] 4 nodes, max depth 2`, depths.split(',').length === 4 && Math.max(...depths.split(',').map(Number)) === 2, depths);

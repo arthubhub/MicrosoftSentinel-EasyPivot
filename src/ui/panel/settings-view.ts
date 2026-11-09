@@ -99,6 +99,8 @@ export interface SettingsViewOptions {
    * waiting for the panel to be reopened.
    */
   readonly onTiChange?: () => void;
+  /** #27: the background toggle changed (rules list shows or hides its ↻ buttons) */
+  readonly onBackgroundChange?: () => void;
   /**
    * The tenant key the case bar resolved (`ui/case-bar.ts`'s
    * `getCurrentKey()`), or `undefined` while it is still resolving. The
@@ -170,6 +172,7 @@ function importRefusalMessage(code: CaseImportRefusalCode | ClientsImportRefusal
 
 export function createSettingsView(options?: SettingsViewOptions): SettingsView {
   const onTiChange = options?.onTiChange;
+  const onBackgroundChange = options?.onBackgroundChange;
   // Settings
   const settings = el('div', `${P}-settings`);
   settings.hidden = true;
@@ -209,6 +212,38 @@ export function createSettingsView(options?: SettingsViewOptions): SettingsView 
   sanitizeLabel.append(sanitizeBox, document.createTextNode(t('settings.sanitize.label')));
   sanitizeRow.appendChild(sanitizeLabel);
   const sanitizeHint = el('div', `${P}-status`, t('settings.sanitize.hint'));
+
+  // ── capture.keepSampleForManual (U4): the report shows an excerpt of each
+  // query's results, so a manually-run query keeps its row sample by default.
+  // Same store-time rule as above: affects queries captured from now on. ──
+  const manualRow = el('div', `${P}-ti-provider-row`);
+  const manualBox = el('input', `${P}-ti-checkbox`);
+  manualBox.type = 'checkbox';
+  manualBox.checked = getSetting('capture').keepSampleForManual;
+  manualBox.addEventListener('change', () => {
+    const capture = getSetting('capture');
+    setSetting('capture', { ...capture, keepSampleForManual: manualBox.checked });
+    log.debug('capture: keepSampleForManual toggled', { enabled: manualBox.checked });
+  });
+  const manualLabel = el('label', `${P}-ti-provider-label`);
+  manualLabel.append(manualBox, document.createTextNode(t('settings.keepManual.label')));
+  manualRow.appendChild(manualLabel);
+  const manualHint = el('div', `${P}-status`, t('settings.keepManual.hint', { n: getSetting('capture').maxRowsSample }));
+
+  // ── background.enabled (#27): off by default, explicit opt-in ──
+  const bgRow = el('div', `${P}-ti-provider-row`);
+  const bgBox = el('input', `${P}-ti-checkbox`);
+  bgBox.type = 'checkbox';
+  bgBox.checked = getSetting('background').enabled;
+  bgBox.addEventListener('change', () => {
+    setSetting('background', { enabled: bgBox.checked });
+    log.info('background queries toggled', { enabled: bgBox.checked });
+    onBackgroundChange?.();
+  });
+  const bgLabel = el('label', `${P}-ti-provider-label`);
+  bgLabel.append(bgBox, document.createTextNode(t('settings.background.label')));
+  bgRow.appendChild(bgLabel);
+  const bgHint = el('div', `${P}-status`, t('settings.background.hint'));
 
   const purgeTitle = el('span', `${P}-field-label`, t('settings.purge.title'));
   const purgeStatus = el('div', `${P}-status`);
@@ -374,7 +409,7 @@ export function createSettingsView(options?: SettingsViewOptions): SettingsView 
     catalogWarnings,
     purgeTitle,
     purgeStatus,
-    purgeRow, sanitizeRow, sanitizeHint,
+    purgeRow, sanitizeRow, sanitizeHint, manualRow, manualHint, bgRow, bgHint,
     tiTitle,
     tiProvidersList,
     tiAddRow,

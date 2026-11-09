@@ -1,6 +1,6 @@
 import type { IndicatorId, PivotRule, PivotSnapshot, PlatformVariant } from '../../types.ts';
 import { CSS_PREFIX } from '../../config.ts';
-import { ACTION_IDS, getActionLabel, getRulesForIndicator } from '../../core/pivot.ts';
+import { ACTION_IDS, getActionLabel, getIndicatorIds, getIndicatorLabel, getRulesForIndicator } from '../../core/pivot.ts';
 import { t } from '../../i18n/index.ts';
 import { P, el, button } from './shared.ts';
 
@@ -19,6 +19,8 @@ export interface RulesView {
     variant: PlatformVariant,
     recentRuleIds: readonly string[],
     onRuleClick: (rule: PivotRule) => void,
+    /** #27: set when background queries are on - adds a "↻" button per rule */
+    onBackground?: (rule: PivotRule) => void,
   ): void;
   /** Clear the search box and scroll back to the top (panel re-open) */
   resetView(): void;
@@ -29,9 +31,14 @@ function fold(s: string): string {
   return s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 }
 
+function targetLabels(rule: PivotRule): string {
+  return (rule.targets ?? []).map((id) => getIndicatorLabel(id)).join(', ');
+}
+
 function matchesSearch(rule: PivotRule, needle: string): boolean {
   if (!needle) return true;
-  return fold(`${rule.id} ${rule.name} ${rule.description}`).includes(needle);
+  // Targets are searchable too (U3): "machine" finds every rule that leads to a device
+  return fold(`${rule.id} ${rule.name} ${rule.description} ${targetLabels(rule)}`).includes(needle);
 }
 
 export function createRulesView(): RulesView {
@@ -46,6 +53,12 @@ export function createRulesView(): RulesView {
   searchInput.placeholder = t('panel.rules.searchPlaceholder');
   searchInput.title = t('panel.rules.searchTitle');
   searchWrap.appendChild(searchInput);
+
+  // ── "Pivot to" filter (U3): one chip per indicator type some eligible rule leads to ──
+  const targetsRow = el('div', `${P}-targets`);
+  targetsRow.hidden = true;
+  searchWrap.appendChild(targetsRow);
+  let targetFilter: IndicatorId | null = null;
 
   // Rules (the only scrolling area, nested under `root` so the search box stays put)
   const list = el('div', `${P}-list`);
@@ -63,12 +76,39 @@ export function createRulesView(): RulesView {
     variant: PlatformVariant;
     recentRuleIds: readonly string[];
     onRuleClick: (rule: PivotRule) => void;
+    onBackground?: (rule: PivotRule) => void;
   } | null = null;
 
   function ruleMeta(rule: PivotRule): string {
     const parts = [rule.id, `−${rule.window.before} / +${rule.window.after}`];
     if (rule.render && rule.render !== 'table') parts.push(rule.render);
+    const targets = targetLabels(rule);
+    if (targets) parts.push(`→ ${targets}`);
     return parts.join(' · ');
+  }
+
+  function renderTargets(eligible: readonly PivotRule[], onChange: () => void): void {
+    const present = new Set(eligible.flatMap((r) => r.targets ?? []));
+    const ids = getIndicatorIds().filter((id) => present.has(id));
+    if (targetFilter && !present.has(targetFilter)) targetFilter = null;
+    targetsRow.replaceChildren();
+    targetsRow.hidden = ids.length === 0;
+    if (ids.length === 0) return;
+    targetsRow.appendChild(el('span', `${P}-field-label`, t('panel.rules.targetsLabel')));
+    const chip = (id: IndicatorId | null, label: string): void => {
+      let cls = `${CSS_PREFIX}-category-chip ${P}-target`;
+      if (id === targetFilter) cls += ` ${CSS_PREFIX}-category-chip--active`;
+      const b = button(cls, label, t('panel.rules.targetsTitle'));
+      b.setAttribute('aria-pressed', String(id === targetFilter));
+      b.addEventListener('click', () => {
+        targetFilter = id;
+        highlightIndex = -1;
+        onChange();
+      });
+      targetsRow.appendChild(b);
+    };
+    chip(null, t('panel.rules.targetsAll'));
+    for (const id of ids) chip(id, `→ ${getIndicatorLabel(id)}`);
   }
 
   function renderRule(
@@ -124,7 +164,15 @@ export function createRulesView(): RulesView {
     });
     rowEl.addEventListener('click', () => onRuleClick(rule));
 
-    rowEl.append(body, chevron);
+    const onBackground = lastArgs?.onBackground;
+    if (onBackground) {
+      const bg = button(`${CSS_PREFIX}-icon-btn ${P}-bg-btn`, '↻', t('panel.rules.backgroundTitle'));
+      bg.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onBackground(rule);
+      });
+      rowEl.append(body, bg, chevron);
+    } else rowEl.append(body, chevron);
     item.append(rowEl, details);
     return { item, rowEl };
   }
@@ -147,8 +195,11 @@ export function createRulesView(): RulesView {
     const eligible = getRulesForIndicator(selected, variant);
     const hiddenCount = getRulesForIndicator(selected).length - eligible.length;
 
+    renderTargets(eligible, render);
     const needle = fold(searchInput.value.trim());
-    const filtered = needle ? eligible.filter((r) => matchesSearch(r, needle)) : eligible;
+    const filtered = eligible.filter(
+      (r) => matchesSearch(r, needle) && (!targetFilter || (r.targets ?? []).includes(targetFilter)),
+    );
 
     flatRules = [];
     rowEls = [];
@@ -156,7 +207,9 @@ export function createRulesView(): RulesView {
     if (eligible.length === 0) {
       list.appendChild(el('div', `${CSS_PREFIX}-empty`, t('panel.rules.noRules')));
     } else if (filtered.length === 0) {
-      list.appendChild(el('div', `${CSS_PREFIX}-empty`, t('panel.rules.noSearchMatch')));
+      list.appendChild(
+        el('div', `${CSS_PREFIX}-empty`, t(needle ? 'panel.rules.noSearchMatch' : 'panel.rules.noTargetMatch')),
+      );
     } else {
       const ran = new Set(
         (snapshot?.steps ?? []).filter((s) => s.value === value).map((s) => s.ruleId),
@@ -230,8 +283,9 @@ export function createRulesView(): RulesView {
     variant: PlatformVariant,
     recentRuleIds: readonly string[],
     onRuleClick: (rule: PivotRule) => void,
+    onBackground?: (rule: PivotRule) => void,
   ): void {
-    lastArgs = { selected, expanded, snapshot, value, variant, recentRuleIds, onRuleClick };
+    lastArgs = { selected, expanded, snapshot, value, variant, recentRuleIds, onRuleClick, onBackground };
     render();
   }
 
@@ -265,6 +319,7 @@ export function createRulesView(): RulesView {
 
   function resetView(): void {
     searchInput.value = '';
+    targetFilter = null;
     highlightIndex = -1;
     render();
     list.scrollTop = 0;
