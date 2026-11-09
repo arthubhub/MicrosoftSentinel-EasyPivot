@@ -24,10 +24,15 @@ export interface ParamsView {
 }
 
 // ── Time window presets (#19) — vocabulary parsed by parseDurationMinutes ──
-const PRESETS: readonly { labelKey: 'panel.params.preset1h' | 'panel.params.preset24h' | 'panel.params.preset7d'; duration: string }[] = [
-  { labelKey: 'panel.params.preset1h', duration: '1h' },
-  { labelKey: 'panel.params.preset24h', duration: '24h' },
-  { labelKey: 'panel.params.preset7d', duration: '7d' },
+// #23: 1h, 4h, 12h, 1d, 2d, 4d, 7d (labels built from the unit keys below)
+const PRESETS: readonly { n: number; unit: 'h' | 'd' }[] = [
+  { n: 1, unit: 'h' },
+  { n: 4, unit: 'h' },
+  { n: 12, unit: 'h' },
+  { n: 1, unit: 'd' },
+  { n: 2, unit: 'd' },
+  { n: 4, unit: 'd' },
+  { n: 7, unit: 'd' },
 ];
 
 export function createParamsView(): ParamsView {
@@ -58,11 +63,13 @@ export function createParamsView(): ParamsView {
   presetsWrap.appendChild(el('span', `${P}-field-label`, t('panel.params.presetsLabel')));
   const presetsRow = el('div', `${P}-actions ${P}-presets`);
   for (const preset of PRESETS) {
-    const presetBtn = button(`${P}-btn`, t(preset.labelKey), t('panel.params.presetTitle'));
+    const duration = `${preset.n}${preset.unit}`;
+    const label = t(preset.unit === 'h' ? 'panel.params.presetHours' : 'panel.params.presetDays', { n: preset.n });
+    const presetBtn = button(`${P}-btn`, label, t('panel.params.presetTitle'));
     presetBtn.addEventListener('click', () => {
-      beforeField.input.value = preset.duration;
-      afterField.input.value = preset.duration;
-      log.debug('panel: time window preset applied', { duration: preset.duration });
+      beforeField.input.value = duration;
+      afterField.input.value = duration;
+      log.debug('panel: time window preset applied', { duration });
     });
     presetsRow.appendChild(presetBtn);
   }

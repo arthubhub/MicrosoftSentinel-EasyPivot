@@ -50,6 +50,12 @@ export interface CaptureProfile {
   ): { readonly kql: string; readonly timespan?: string; readonly tenantKey?: string } | null;
   /** `responseBody` is the parsed response; `req` is the matching request (for `maxRows`, `timespan`, …). */
   parseResponse(responseBody: unknown, req: CaptureRequest): ParsedResult | null;
+  /**
+   * #27: the same request with another KQL (background context query). The
+   * time range is the query's own (rules carry `TimeGenerated between`), so
+   * any UI time range of the template is dropped. `null` = cannot rewrite.
+   */
+  buildReplay?(template: CaptureRequest, kql: string): { readonly url: URL; readonly body: unknown } | null;
 }
 
 export interface ParsedResult {

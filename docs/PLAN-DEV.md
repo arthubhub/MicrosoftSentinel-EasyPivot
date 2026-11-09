@@ -2,6 +2,10 @@
 
 Oct 20, 2026 · @eddy
 
+## État au 8 novembre 2026
+
+Les phases 1 à 6 sont implémentées (sauf #20 nouveaux types et #27 requêtes en arrière-plan). Le suivi détaillé ne se fait plus dans ce document mais dans `../roadmap/tasks.json` (dossier parent, hors dépôt), rendu dans un tracker. Ajouts du 08/11 : historique sans lancer de règle, panneau agrandi et défilant, variantes Defender pour toutes les règles, `targets` et filtre « Pivoter vers », valeurs du dernier résultat, rapport avec extraits de résultats, playbooks guidés, découverte → issue de couverture. Les consignes « commit après chaque phase » ci-dessous ne s'appliquent plus aux sessions Claude Code : l'utilisateur commite lui-même.
+
 ## Mode d'emploi
 
 Ce document sert de cahier des charges à Claude Code : exporte-le en Markdown, place-le dans le dépôt, puis fais avancer le projet une phase à la fois. L'étape 0 (format des échanges de requêtes) a été relevée le 21/10/2026 pour le cas nominal. Erreurs, troncature, bouton Run et éditeur Sentinel ont été relevés le même jour ; seuls des points facultatifs restent ouverts (liste « Informations encore manquantes »).

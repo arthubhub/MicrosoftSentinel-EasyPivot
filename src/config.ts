@@ -37,6 +37,8 @@ export const STORAGE_KEYS = {
    * resourceId or a client name (those stay in `shq_clients` only).
    */
   CASES: 'shq_cases',
+  /** Coverage gaps already proposed as an issue (#33, `core/coverage.ts`): `"type|table|column"[]`, no value. */
+  COVERAGE_REPORTED: 'shq_coverage_reported',
   /**
    * Prefix + case id -> `{ notes, playbook?, snapshots, runs }` (N2, phase
    * 5b). Per-case storage; the legacy `shq_pivot_snapshots` is only read
@@ -163,6 +165,25 @@ export const PIVOT = {
 
 // ── Notification duration ──
 export const NOTIFICATION_DURATION_MS = 3000;
+
+// ── Coverage issues (#33): where a missing-source issue is opened (prefilled form, user submits) ──
+export const COVERAGE = {
+  ISSUE_NEW_URL: 'https://github.com/arthubhub/MSSentinel-PivotRules/issues/new',
+  TEMPLATE: 'missing-source.yml',
+  MAX_URL_CHARS: 8000,
+  /** Gaps listed at most */
+  MAX_GAPS: 20,
+} as const;
+
+// ── Report (U4): results excerpt per query ──
+export const REPORT = {
+  /** Rows shown per query (from the stored `rowsSample`) */
+  EXCERPT_ROWS: 50,
+  /** Columns shown per query; empty columns are dropped first */
+  EXCERPT_COLS: 12,
+  /** Characters per cell (dynamic/JSON columns can be long) */
+  EXCERPT_CELL_CHARS: 200,
+} as const;
 
 // ── Capture store (N1, phase 4c) ──
 export const CAPTURE_STORE = {

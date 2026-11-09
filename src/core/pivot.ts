@@ -8,6 +8,7 @@ import type {
   PlatformVariant,
 } from '../types.ts';
 import { PIVOT } from '../config.ts';
+import { t } from '../i18n/index.ts';
 import bundledRulesJson from '../../rules/pivot-rules.json';
 
 /**
@@ -71,8 +72,23 @@ export function getIndicatorIds(): readonly IndicatorId[] {
   return Object.keys(catalog.indicators) as IndicatorId[];
 }
 
+/**
+ * Type labels follow the UI language (the catalog is published in English):
+ * the 9 known types come from i18n, an unknown type falls back to the catalog's label.
+ */
 export function getIndicatorLabel(id: IndicatorId): string {
-  return catalog.indicators[id]?.label ?? id;
+  switch (id as string) {
+    case 'ip': return t('indicator.ip');
+    case 'account': return t('indicator.account');
+    case 'email': return t('indicator.email');
+    case 'url': return t('indicator.url');
+    case 'domain': return t('indicator.domain');
+    case 'device': return t('indicator.device');
+    case 'process': return t('indicator.process');
+    case 'application': return t('indicator.application');
+    case 'hash': return t('indicator.hash');
+    default: return catalog.indicators[id as IndicatorId]?.label ?? String(id);
+  }
 }
 
 export function getActionLabel(id: PivotActionId): string {

@@ -28,7 +28,7 @@ export const popupStyles = `
     background: none;
     border: none;
     color: var(--colorIconSecondary, #605e5c);
-    font-size: 14px;
+    font-size: 15px;
     cursor: pointer;
     padding: 2px 5px;
     line-height: 1;
@@ -43,7 +43,7 @@ export const popupStyles = `
 
   .${CSS_PREFIX}-category-chip {
     padding: 1px 7px !important;
-    font-size: 10px !important;
+    font-size: 11px !important;
     font-weight: 500 !important;
     color: var(--colorTextSecondary, #646464) !important;
     background: transparent !important;
@@ -90,7 +90,7 @@ export const popupStyles = `
   }
 
   .${CSS_PREFIX}-badge {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
     padding: 1px 5px;
     border-radius: 2px;
@@ -121,7 +121,7 @@ export const popupStyles = `
     background: transparent !important;
     color: var(--colorTextDisabled, #a19f9d) !important;
     cursor: pointer !important;
-    font-size: 13px !important;
+    font-size: 14px !important;
     line-height: 1 !important;
     box-sizing: border-box !important;
     transition: color 0.12s, background 0.12s !important;
@@ -161,7 +161,7 @@ export const popupStyles = `
     padding: 24px 14px;
     text-align: center;
     color: var(--colorTextDisabled, #a19f9d);
-    font-size: 12px;
+    font-size: 13px;
   }
 
   @media (prefers-reduced-motion: reduce) {

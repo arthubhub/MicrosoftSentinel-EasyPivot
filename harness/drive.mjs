@@ -105,8 +105,16 @@ const page = {
   exists: (s) => evalJs(`!!document.querySelector(${JSON.stringify(s)})`),
   errors: () => [...problems],
   logs: () => [...logs],
-  shot: async (path) => {
-    const r = await send('Page.captureScreenshot', { format: 'png' });
+  // shot(path) = whole viewport; shot(path, { clip: {x,y,width,height} | selector, scale: 2 }) = one region, sharp
+  shot: async (path, opts = {}) => {
+    let clip = opts.clip;
+    if (typeof clip === 'string') {
+      clip = await evalJs(`(()=>{const els=[...document.querySelectorAll(${JSON.stringify(clip)})].filter(e=>e.getClientRects().length>0 && !e.hidden);
+        if(!els.length) return null; const rs=els.map(e=>e.getBoundingClientRect());
+        const x=Math.min(...rs.map(r=>r.left)), y=Math.min(...rs.map(r=>r.top)), r2=Math.max(...rs.map(r=>r.right)), b=Math.max(...rs.map(r=>r.bottom));
+        const X=Math.max(0,x-12), Y=Math.max(0,y-12); return {x:X+scrollX, y:Y+scrollY, width:Math.min(innerWidth,r2+12)-X, height:Math.min(innerHeight,b+12)-Y}})()`);
+    }
+    const r = await send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: opts.scale ?? 2 }, captureBeyondViewport: true } : {}) });
     (await import('node:fs')).writeFileSync(path, Buffer.from(r.result.data, 'base64'));
   },
 };

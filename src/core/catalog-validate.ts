@@ -109,9 +109,24 @@ function checkRules(catalog: PivotCatalog, errors: string[], warnings: string[])
     }
     if (known === 0) warnings.push(t('validate.noKnownIndicator', { id: rule.id }));
 
+    // U3: an unknown target only loses its badge/filter entry, never the rule
+    for (const target of rule.targets ?? []) {
+      if (!knownIndicators.has(target)) warnings.push(t('validate.unknownTarget', { id: rule.id, name: target }));
+    }
+
     if (!knownActions.has(rule.action)) {
       warnings.push(t('validate.unknownAction', { id: rule.id, name: rule.action }));
     }
+  }
+}
+
+// ── Scenarios (N4, #32): a scenario citing an unknown rule is ignored (core/playbooks.ts), with a warning ──
+
+function checkScenarios(catalog: PivotCatalog, warnings: string[]): void {
+  const ids = new Set((catalog.rules ?? []).map((r) => r.id));
+  for (const sc of catalog.scenarios ?? []) {
+    const missing = (sc?.steps ?? []).map((st) => st?.ruleId).filter((id) => typeof id !== 'string' || !ids.has(id));
+    if (missing.length) warnings.push(t('validate.scenarioUnknownRule', { id: String(sc?.id), rules: missing.join(', ') }));
   }
 }
 
@@ -195,6 +210,7 @@ export function validateCatalog(catalog: PivotCatalog): CatalogReport {
 
   checkFormatVersion(catalog, errors);
   checkRules(catalog, errors, warnings);
+  checkScenarios(catalog, warnings);
   checkPatterns(catalog, warnings);
   const locations = sanitizeLocations(catalog, warnings);
 

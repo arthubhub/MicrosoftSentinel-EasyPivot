@@ -1,11 +1,14 @@
 import type { IndicatorId, PivotSnapshot, QueryRun } from '../types.ts';
-import { CAPTURE_STORE } from '../config.ts';
+import { CAPTURE_STORE, REPORT } from '../config.ts';
 import { getCase, getCaseRuns, getCaseSnapshots } from './cases.ts';
 import { detectForCell } from './detection.ts';
 import { buildTree, timeline, type TreeNode } from './graph.ts';
+import { getIndicatorLabel } from './pivot.ts';
+import { describeRun } from './run-info.ts';
 import { log } from './log.ts';
 import {
   createTextRedactor,
+  isContextColumn,
   kindForTyped,
   redactKqlStringLiterals,
   redactTypedValue,
@@ -113,10 +116,26 @@ interface TreeLine {
   readonly label: string;
   readonly meta: string;
   readonly note: string;
+  /** Pivots launched from this node (A2.3): "IP-P1 Name · value · 12 row(s)" */
+  readonly steps: readonly string[];
 }
 
+interface QueryExcerpt {
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly string[])[];
+  /** "first 50 rows of 986", hidden columns... ('' when nothing to say) */
+  readonly note: string;
+}
+
+/** One query (or several identical ones) with what it found (U4). */
 interface QueryBlock {
+  /** "Rule name (ID)" or "Manual query" */
   readonly heading: string;
+  /** date · value · type · status · rows · ×N, already masked */
+  readonly meta: readonly string[];
+  readonly excerpt?: QueryExcerpt;
+  /** Shown when there is no excerpt: why */
+  readonly noExcerpt: string;
   readonly kql: string;
 }
 
@@ -137,6 +156,7 @@ interface ReportModel {
     readonly s6: string;
     readonly s7: string;
     readonly timelineHead: readonly string[];
+    /** '' when no row uses "n/a" */
     readonly timelineLegend: string;
   };
   readonly info: readonly InfoRow[];
@@ -153,6 +173,7 @@ interface ReportModel {
   readonly appendixNotes: readonly string[];
   readonly queries: readonly QueryBlock[];
   readonly emptyAppendix: string;
+  readonly kqlLabel: string;
 }
 
 // ── Text hygiene ──
@@ -251,9 +272,21 @@ function collectKnown(
     }
   }
   for (const [value, type] of stepTypes) known.push({ value, kind: kindForTyped(value, type) });
+  // Context columns (table, operation, country...) identify nobody: making their values "known"
+  // would mask them everywhere, including the results excerpts that are meant to show them (U4).
   for (const run of runs) {
-    for (const entries of Object.values(run.summary?.topValues ?? {})) for (const [v] of entries) push(v);
-    for (const row of run.rowsSample ?? []) for (const v of row) push(v);
+    const cols = run.columns ?? [];
+    for (const [col, entries] of Object.entries(run.summary?.topValues ?? {})) {
+      const type = cols.find((c) => c.name === col)?.type;
+      if (isContextColumn(col, type)) continue;
+      for (const [v] of entries) push(v);
+    }
+    for (const row of run.rowsSample ?? []) {
+      row.forEach((v, i) => {
+        const c = cols[i];
+        if (!c || !isContextColumn(str(c.name), str(c.type))) push(v);
+      });
+    }
   }
   return known;
 }
@@ -275,16 +308,49 @@ function buildReportModel(caseId: string, options: ReportOptions): ReportModel |
 
   /** Free text (notes, names): hygiene, then the token masker when masking. */
   const text = (s: string): string => redactText(clean(s));
+  // Distinct values that mask to the same text (every IPv4 is 203.0.x.x) get a
+  // stable index, so the masked report still tells them apart (A2.3).
+  const maskIndex = new Map<string, Map<string, number>>();
+  const register = (v: string, type: IndicatorId | undefined): void => {
+    const x = clean(v).trim();
+    if (!masked || !x) return;
+    const m = redactTypedValue(x, type);
+    if (m === x) return;
+    const seen = maskIndex.get(m) ?? new Map<string, number>();
+    if (!seen.has(x.toLowerCase())) seen.set(x.toLowerCase(), seen.size + 1);
+    maskIndex.set(m, seen);
+  };
+  for (const snap of snapshots) {
+    register(snap.value, snapshotType(snap));
+    for (const step of snap.steps ?? []) register(step.value, step.indicator);
+  }
   /** A value with a known type. */
   const typed = (v: string, type: IndicatorId | undefined): string => {
     const x = clean(v);
-    return masked ? redactTypedValue(x, type) : x;
+    if (!masked) return x;
+    const m = redactTypedValue(x, type);
+    register(x, type);
+    const seen = maskIndex.get(m);
+    const n = seen && seen.size > 1 ? seen.get(x.trim().toLowerCase()) : undefined;
+    return n !== undefined ? `${m} [${n}]` : m;
+  };
+  const ruleLabel = (id: string): string => {
+    const name = describeRun({ ruleId: id, startedAt: 0 }, []).ruleName;
+    return name && name !== id ? `${clean(id)} ${clean(name)}` : clean(id);
   };
   /** A table cell: customer data of unknown shape. */
   const cellText = (v: unknown): string => {
     const x = clean(str(v));
     if (!masked) return x;
     return isInertCell(x.trim()) ? x : redactUnknown(x);
+  };
+
+  /** A results-excerpt cell (U4): context columns keep token-masked text, the rest is masked whole. */
+  const excerptCell = (v: unknown, column: { readonly name: string; readonly type: string } | undefined): string => {
+    const x = clean(str(v));
+    if (!masked) return x;
+    if (isInertCell(x.trim())) return x;
+    return column && isContextColumn(str(column.name), str(column.type)) ? redactText(x) : redactUnknown(x);
   };
 
   const snapById = new Map<string, PivotSnapshot>();
@@ -309,7 +375,7 @@ function buildReportModel(caseId: string, options: ReportOptions): ReportModel |
   const timelineRows: TimelineRow[] = entries.map((e) => ({
     cells: [
       fmtDate(e.at),
-      masked ? redactText(clean(e.ruleId)) : clean(e.ruleId),
+      ruleLabel(e.ruleId),
       oneLine(typed(e.value, e.indicator)),
       e.rows === null ? t('report.rowsUnknown') : String(e.rows),
       [e.truncated ? t('report.truncated') : '', e.error ? t('report.error') : ''].filter(Boolean).join(', '),
@@ -374,22 +440,72 @@ function buildReportModel(caseId: string, options: ReportOptions): ReportModel |
             .filter(Boolean)
             .join(', ')
         : '';
-      tree.push({ depth: item.depth, label: nodeLabel(snap), meta, note: text(snap.note ?? '').trim() });
+      const steps = entries
+        .filter((e) => e.snapshotId === snap.id)
+        .map((e) => [ruleLabel(e.ruleId), oneLine(typed(e.value, e.indicator)),
+          e.rows === null ? t('report.rowsUnknown') : t('report.rows', { n: e.rows }),
+          e.truncated ? t('report.truncated') : '', e.error ? t('report.error') : ''].filter(Boolean).join(' · '));
+      tree.push({ depth: item.depth, label: nodeLabel(snap), meta: meta || (steps.length === 0 ? t('report.noPivot') : ''),
+        note: text(snap.note ?? '').trim(), steps });
     }
     for (let i = item.node.children.length - 1; i >= 0; i--) stack.push({ node: item.node.children[i], depth: item.depth + 1 });
   }
 
-  // 7. Appendix
+  // 7. Queries and results (U4): what each query was (pivot name, value, type)
+  // and an excerpt of what it returned. Identical queries (same kqlHash) are
+  // one block "×N"; the excerpt comes from the latest of them that kept rows.
   const appendixNotes = [t('report.appendixTruncated', { max: CAPTURE_STORE.KQL_PREVIEW_CHARS })];
   if (masked) appendixNotes.push(t('report.appendixMasked'));
-  const queries: QueryBlock[] = runs.map((run) => {
-    const raw = str(run.kqlPreview);
+  const groupsByHash = new Map<string, QueryRun[]>();
+  for (const run of runs) {
+    const key = run.kqlHash || run.id;
+    const list = groupsByHash.get(key) ?? [];
+    list.push(run);
+    groupsByHash.set(key, list);
+  }
+  const queries: QueryBlock[] = [...groupsByHash.values()].map((group) => {
+    const last = group[group.length - 1];
+    const withRows = [...group].reverse().find((r) => (r.rowsSample?.length ?? 0) > 0);
+    const shown = withRows ?? last;
+    const info = describeRun(shown, snapshots);
+    const heading = info.ruleId
+      ? t('report.ruleWithId', { name: clean(info.ruleName), id: clean(info.ruleId) })
+      : t('report.manualQuery');
+    const tables = shown.sourceTables.map((x) => clean(x)).filter((x) => x && x !== '***');
+    const status = shown.status === 'truncated' ? t('report.truncated') : shown.status === 'error' ? t('report.error') : '';
+    const meta = [
+      group.length > 1 ? t('report.runSpan', { first: fmtDate(group[0].startedAt), last: fmtDate(last.startedAt) }) : fmtDate(shown.startedAt),
+      info.value ? oneLine(typed(info.value, info.indicator)) : '',
+      info.indicator ? getIndicatorLabel(info.indicator) : '',
+      !info.ruleId && tables.length ? t('report.tables', { list: tables.slice(0, 6).join(', ') }) : '',
+      t('report.rows', { n: shown.rowCount }),
+      status,
+      shown.status === 'error' && shown.error ? short(oneLine(text(shown.error)), 300) : '',
+      group.length > 1 ? t('report.runCount', { n: group.length }) : '',
+    ].filter(Boolean);
+
+    let excerpt: QueryExcerpt | undefined;
+    const sample = shown.rowsSample ?? [];
+    if (sample.length > 0 && shown.columns.length > 0) {
+      const rows = sample.slice(0, REPORT.EXCERPT_ROWS);
+      const filled = shown.columns.map((_c, i) => rows.some((r) => str(r[i]).trim() !== ''));
+      const order = shown.columns.map((_c, i) => i).filter((i) => filled[i]);
+      const cols = order.slice(0, REPORT.EXCERPT_COLS);
+      const hidden = shown.columns.length - cols.length;
+      const notes: string[] = [];
+      if (rows.length < shown.rowCount) notes.push(t('report.excerptRows', { shown: rows.length, total: shown.rowCount }));
+      if (hidden > 0) notes.push(t('report.excerptCols', { n: hidden }));
+      excerpt = {
+        columns: cols.map((i) => oneLine(clean(str(shown.columns[i]?.name)))),
+        rows: rows.map((r) => cols.map((i) => short(oneLine(excerptCell(r[i], shown.columns[i])), REPORT.EXCERPT_CELL_CHARS))),
+        note: notes.join(' · '),
+      };
+    }
+    const noExcerpt = shown.status === 'error' ? t('report.excerptError') : shown.rowCount === 0 ? t('report.excerptEmpty') : t('report.excerptNotKept');
+
+    const raw = str(shown.kqlPreview);
     const kql = raw.trim() === '' ? t('report.noQuery') : masked ? redactText(clean(redactKqlStringLiterals(raw, { comments: 'mask' }))) : clean(raw);
-    const status = run.status === 'truncated' ? t('report.truncated') : run.status === 'error' ? t('report.error') : '';
-    const heading = [fmtDate(run.startedAt), run.ruleId ? (masked ? redactText(clean(run.ruleId)) : clean(run.ruleId)) : '', status]
-      .filter(Boolean)
-      .join(' · ');
-    return { heading, kql };
+    return { heading, meta, excerpt, noExcerpt, kql };
   });
 
   const caseName = oneLine(text(options.caseName ?? c.name));
@@ -409,7 +525,7 @@ function buildReportModel(caseId: string, options: ReportOptions): ReportModel |
       s6: t('report.s6'),
       s7: t('report.s7'),
       timelineHead: [t('report.col.date'), t('report.col.rule'), t('report.col.value'), t('report.col.rows'), t('report.col.status')],
-      timelineLegend: t('report.timelineLegend'),
+      timelineLegend: entries.some((e) => e.rows === null) ? t('report.timelineLegend') : '',
     },
     info,
     summary: text(c.notes ?? '').trim(),
@@ -425,6 +541,7 @@ function buildReportModel(caseId: string, options: ReportOptions): ReportModel |
     appendixNotes,
     queries,
     emptyAppendix: t('report.emptyAppendix'),
+    kqlLabel: t('report.kqlLabel'),
   };
 }
 
@@ -515,8 +632,7 @@ function renderMarkdown(m: ReportModel): string {
         m.timeline.map((r) => r.cells.map((cell, i) => (i === 1 || i === 2 ? mdValue(cell, true) : mdEscape(cell)))),
       ),
       '',
-      `_${mdEscape(m.labels.timelineLegend)}_`,
-      '',
+      ...(m.labels.timelineLegend ? [`_${mdEscape(m.labels.timelineLegend)}_`, ''] : []),
     );
   }
 
@@ -540,6 +656,7 @@ function renderMarkdown(m: ReportModel): string {
   for (const line of m.tree) {
     const indent = '  '.repeat(Math.min(line.depth, 8));
     out.push(`${indent}- ${mdValue(line.label, false)}${line.meta ? ` (${mdEscape(line.meta)})` : ''}`);
+    for (const st of line.steps) out.push(`${indent}  - ${mdEscape(st)}`);
     if (line.note) out.push('', mdQuote(line.note, `${indent}  `), '');
   }
   out.push('');
@@ -547,7 +664,16 @@ function renderMarkdown(m: ReportModel): string {
   out.push(`## ${mdEscape(m.labels.s7)}`, '');
   for (const note of m.appendixNotes) out.push(`_${mdEscape(note)}_`, '');
   if (m.queries.length === 0) out.push(mdEscape(m.emptyAppendix), '');
-  for (const q of m.queries) out.push(`### ${mdEscape(q.heading)}`, '', mdFence(q.kql), '');
+  for (const q of m.queries) {
+    out.push(`### ${mdEscape(q.heading)}`, '');
+    out.push(q.meta.map((x) => mdEscape(x)).join(' · '), '');
+    if (q.excerpt) {
+      out.push(mdTable(q.excerpt.columns, q.excerpt.rows.map((r) => r.map((cell) => mdValue(cell, true)))), '');
+      if (q.excerpt.note) out.push(`_${mdEscape(q.excerpt.note)}_`, '');
+    } else out.push(`_${mdEscape(q.noExcerpt)}_`, '');
+    // Our own markup (no data in it): the KQL stays available, folded
+    out.push('<details>', `<summary>${mdEscape(m.kqlLabel)}</summary>`, '', mdFence(q.kql), '', '</details>', '');
+  }
 
   return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;
 }
@@ -597,7 +723,12 @@ const HTML_CSS = `
     white-space: pre-wrap; overflow-wrap: anywhere; }
   ul.tree { list-style: none; margin: 0; padding: 0; }
   ul.tree li { margin: 3px 0; padding-left: calc(var(--depth, 0) * 18px); }
+  ul.steps { margin: 2px 0 4px 18px; padding: 0; list-style: disc; color: #605e5c; font-size: 12px; }
+  ul.steps li { padding-left: 0; margin: 1px 0; }
   ol { margin: 0 0 8px; padding-left: 22px; }
+  details { margin: 6px 0 14px; }
+  summary { cursor: pointer; color: #605e5c; font-size: 12px; }
+  details pre { margin-top: 6px; }
   @media print { body { background: #fff; padding: 0; } main { border: 0; padding: 0; max-width: none; } }
 `;
 
@@ -626,7 +757,7 @@ function renderHtml(m: ReportModel): string {
   if (m.timeline.length === 0) p.push(`<p class="muted">${E(m.emptyTimeline)}</p>`);
   else {
     p.push(htmlTable(m.labels.timelineHead, m.timeline.map((r) => r.cells), new Set([1, 2])));
-    p.push(`<p class="muted">${E(m.labels.timelineLegend)}</p>`);
+    if (m.labels.timelineLegend) p.push(`<p class="muted">${E(m.labels.timelineLegend)}</p>`);
   }
 
   p.push(`<h2>${E(m.labels.s4)}</h2>`);
@@ -655,6 +786,7 @@ function renderHtml(m: ReportModel): string {
         .map(
           (l) =>
             `<li style="--depth:${Math.min(l.depth, 8)}"><code>${E(l.label)}</code>${l.meta ? ` <span class="muted">(${E(l.meta)})</span>` : ''}${
+              l.steps.length ? `<ul class="steps">${l.steps.map((st) => `<li>${E(st)}</li>`).join('')}</ul>` : ''}${
               l.note ? `<div class="note">${E(l.note)}</div>` : ''
             }</li>`,
         )
@@ -665,7 +797,15 @@ function renderHtml(m: ReportModel): string {
   p.push(`<h2>${E(m.labels.s7)}</h2>`);
   for (const note of m.appendixNotes) p.push(`<p class="muted">${E(note)}</p>`);
   if (m.queries.length === 0) p.push(`<p class="muted">${E(m.emptyAppendix)}</p>`);
-  for (const q of m.queries) p.push(`<h3>${E(q.heading)}</h3><pre><code>${E(q.kql)}</code></pre>`);
+  for (const q of m.queries) {
+    p.push(`<h3>${E(q.heading)}</h3>`);
+    p.push(`<p class="muted">${q.meta.map((x) => E(x)).join(' · ')}</p>`);
+    if (q.excerpt) {
+      p.push(htmlTable(q.excerpt.columns, q.excerpt.rows, new Set<number>()));
+      if (q.excerpt.note) p.push(`<p class="muted">${E(q.excerpt.note)}</p>`);
+    } else p.push(`<p class="muted">${E(q.noExcerpt)}</p>`);
+    p.push(`<details><summary>${E(m.kqlLabel)}</summary><pre><code>${E(q.kql)}</code></pre></details>`);
+  }
 
   return [
     '<!doctype html>',

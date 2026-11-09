@@ -115,6 +115,8 @@ if (CAPTURE_MODE) {
     const method = (init?.method ?? 'GET').toUpperCase();
     if (method === 'POST' && QUERY_URL.test(url)) {
       (w.__epFetchLog as string[]).push(url);
+      // #27 test hook: what the last query request carried (harness only)
+      w.__epLastReq = { url, headers: Object.fromEntries(new Headers(init?.headers as HeadersInit | undefined).entries()), body: String(init?.body ?? '') };
       const rows = (w.__epRows as readonly Record<string, string>[] | undefined) ?? ROWS;
       return new Response(JSON.stringify(responseFromRows(rows)), { status: 200, headers: { 'content-type': 'application/json' } });
     }
@@ -301,7 +303,7 @@ async function runEditor(scope: 'all' | 'cursor', override?: string): Promise<{ 
   const url = 'https://api.loganalytics.io' + HARNESS_WS_PATH + '?timespan=P1D';
   const res = await window.fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: 'Bearer harness-fake-token-123' },
     body: JSON.stringify({ query, maxRows: 1001 }),
   });
   const body = (await res.json()) as { tables: { columns: { name: string }[]; rows: unknown[][] }[] };
@@ -516,6 +518,28 @@ function seedReportCase(): void {
   const c = recordSnapshotInCase(id, ctxOf('ZEPHYR-WKS-0412', 'DeviceName', { ...rowA, Step: 'C' }, 'rr-b'), '', 'sentinel');
   if (!c.ok) return;
   addStepToSnapshot(id, c.snapshot.id, { ruleId: 'DM-S1', value: 'ZEPHYR-WKS-0412', indicator: 'device' });
+  // A2.3: a rule re-run from node A on a hand-edited second IP (both mask to 203.0.x.x -> [1] / [2])
+  addStepToSnapshot(id, a.snapshot.id, { ruleId: 'IP-P1', value: '198.51.100.77', indicator: 'ip' });
+  // U4: results excerpts. IP-S1 by day, AC-S1 sign-ins (with a long JSON cell), and manual queries,
+  // two of them identical (same kqlHash -> one block "x2" in the report).
+  const col = (name: string, type = 'string') => ({ name, type });
+  appendLiveRunToCase(id, { ...runFor(id, 'rr-a2', a.snapshot.id, 3, 'ok', now - 2900), ruleId: 'IP-S1', kqlHash: 'h-rr-a2',
+    columns: [col('Day', 'datetime'), col('Table'), col('Events', 'long'), col('Accounts', 'long'), col('Empty')],
+    rowsSample: [['2026-10-24T00:00:00Z', 'SigninLogs', 41, 3, ''], ['2026-10-25T00:00:00Z', 'SigninLogs', 1290, 17, ''],
+      ['2026-10-26T00:00:00Z', 'AADNonInteractiveUserSignInLogs', 77, 2, '']] } as QueryRun);
+  const signin = (i: number) => [`2026-10-26T09:${String(10 + i).padStart(2, '0')}:00Z`, 'margaret.oshea@acme-health.example.com',
+    '192.0.2.188', 'Office 365 Exchange Online', 'NL', i % 3 === 0 ? '0' : '50126',
+    JSON.stringify({ deviceId: '', operatingSystem: 'Windows10', browser: 'Python Requests 2.31', displayName: 'ZEPHYR-WKS-0412' })];
+  appendLiveRunToCase(id, { ...runFor(id, 'rr-b2', b.snapshot.id, 1000, 'truncated', now - 1900), ruleId: 'AC-S1', kqlHash: 'h-rr-b2',
+    columns: ['TimeGenerated', 'UserPrincipalName', 'IPAddress', 'AppDisplayName', 'Location', 'ResultType', 'DeviceDetail'].map((n) => col(n)),
+    rowsSample: Array.from({ length: 60 }, (_x, i) => signin(i)) } as QueryRun);
+  const manual = (rid: string, at: number) => ({ ...runFor(id, rid, '', 2, 'ok', at), snapshotId: undefined, kqlHash: 'h-search-ip',
+    kqlPreview: 'search "192.0.2.188"\n| summarize count() by $table', sourceTables: ['SigninLogs', 'Corp_Proxy_CL'],
+    columns: [col('$table'), col('count_', 'long')], rowsSample: [['SigninLogs', 1408], ['AuditLogs', 3]] }) as QueryRun;
+  appendLiveRunToCase(id, manual('rr-m1', now - 1500));
+  appendLiveRunToCase(id, manual('rr-m2', now - 1400));
+  appendLiveRunToCase(id, { ...runFor(id, 'rr-m3', '', 0, 'error', now - 1300), snapshotId: undefined, kqlHash: 'h-bad',
+    kqlPreview: '| summarize dcount(FolderPath) by DeviceName', error: "Query could not be parsed at '|' on line [1,0]" } as QueryRun);
   setCaseNotes(id, 'Credential stuffing from 192.0.2.188 against margaret.oshea@acme-health.example.com, then lateral movement to ZEPHYR-WKS-0412. The CEO mailbox ceo.lindqvist@acme-health.example.com was touched from 198.51.100.77.');
   setSnapshotNote(id, a.snapshot.id, 'Source of the brute force. Also seen on BACKUP-NAS-9 (not a known value of the case).');
   pinRowToSnapshot(id, b.snapshot.id, { ...rowA, Step: 'B' });

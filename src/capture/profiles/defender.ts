@@ -162,9 +162,46 @@ function parseResponseDefender(body: unknown, req: CaptureRequest): ParsedResult
 
 // ── Profile ──
 
+/** UTF-8 safe base64, to test whether the template's `EncodedQueryText` is base64 of `QueryText`. */
+function base64Utf8(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/**
+ * #27: `QueryText` replaced (CRLF, as the portal sends it), `StartTime` /
+ * `EndTime` = null (range defined in the query, Gabarit). `EncodedQueryText`'s
+ * encoding is not documented: it is rewritten only when the template shows
+ * which one it is (a copy of `QueryText`, or its base64); otherwise dropped.
+ */
+function buildReplayDefender(template: CaptureRequest, kql: string): { url: URL; body: unknown } | null {
+  const body = template.body;
+  if (!isRecord(body) || typeof body.QueryText !== 'string') return null;
+  const text = kql.replace(/\r?\n/g, '\r\n');
+  const next: Record<string, unknown> = { ...body, QueryText: text, StartTime: null, EndTime: null };
+  if ('EncodedQueryText' in body) {
+    const enc = body.EncodedQueryText;
+    let sameAsText = false;
+    let isBase64 = false;
+    try {
+      sameAsText = enc === body.QueryText;
+      isBase64 = !sameAsText && typeof enc === 'string' && enc === base64Utf8(body.QueryText);
+    } catch {
+      /* not encodable: treated as unknown */
+    }
+    if (sameAsText) next.EncodedQueryText = text;
+    else if (isBase64) next.EncodedQueryText = base64Utf8(text);
+    else delete next.EncodedQueryText;
+  }
+  return { url: new URL(template.url.href), body: next };
+}
+
 export const defenderProfile: CaptureProfile = {
   platform: 'defender',
   match: matchDefender,
   extractQuery: extractQueryDefender,
   parseResponse: parseResponseDefender,
+  buildReplay: buildReplayDefender,
 };
